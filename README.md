@@ -1,36 +1,39 @@
 # SeqDPI
 
-SeqDPI, Windows için tek butonlu sistem geneli erişim profili uygulaması. DNS'i Cloudflare üstüne alır, Windows kullanıcı proxy'sini ve WinHTTP proxy ayarını yerel SeqDPI proxy'sine yönlendirir. Yerel proxy, TLS bağlantı başlangıcını küçük parçalara bölerek basit DPI kontrollerini atlatmayı dener.
+SeqDPI artık proxy denemesi değil, Windows paket seviyesinde sistem modu açan tek butonlu bir GUI.
 
-## Özellikler
+Araştırma sonucu net: GoodbyeDPI tarayıcı proxy'si gibi çalışmıyor. WinDivert sürücüsüyle TCP paketlerini yakalıyor ve DPI cihazlarının gördüğü paketleri bozarken gerçek hedef sunucunun bağlantıyı kabul etmesini sağlıyor. Bu yüzden sistem proxy'sini yok sayan oyun istemcileri için de doğru yön bu.
 
-- Tek butonla sistem proxy modu
-- Cloudflare IPv4 ve IPv6 DNS profili
-- Yerel HTTP/HTTPS CONNECT proxy
-- TLS ClientHello parçalama
-- WinINet ve WinHTTP proxy ayarı
-- Roblox, Discord ve genel HTTPS siteleri için bağlantı kontrolü
-- Tek butonla DNS ve proxy ayarlarını geri alma
+## Ne yapar?
+
+- GoodbyeDPI'nin son resmi release paketini indirir
+- `goodbyedpi.exe` motorunu WinDivert ile yönetici olarak çalıştırır
+- En güçlü hazır preset olan `-9` ile başlar
+- Çalışmazsa GUI'den `-8` ve `-7` alternatiflerine geçebilir
+- DNS'i Cloudflare IPv4/IPv6 üstüne alır
+- DNS önbelleğini temizler
+- Roblox, Discord ve genel HTTPS çözümlemesini kontrol eder
+- Tek butonla motoru durdurur ve DNS'i otomatiğe döndürür
 
 ## Çalıştırma
 
-Windows üzerinde Python 3.11 veya üstü yeterli.
+Windows üzerinde Python 3.11 veya üstü:
 
 ```powershell
 python seqdpi.py
 ```
 
-Uygulama sistem DNS, kullanıcı proxy ve WinHTTP proxy ayarlarını değiştirdiği için yönetici izni ister.
+Yönetici izni gerekir. İlk çalıştırmada GoodbyeDPI motoru `%APPDATA%/SeqDPI/engine` altına indirilir.
 
-## Önemli not
-
-Bu sürüm sistem proxy'sini kullanan uygulamalar için çalışır. Tarayıcılar, Discord ve birçok masaüstü uygulaması bunu dinler. Bazı oyun istemcileri ve kernel seviyesinde ağ kullanan programlar Windows proxy ayarını yok sayabilir. O sınıf için bir sonraki adım sürücü tabanlı WinDivert/WFP modu olur.
-
-## Tek dosya exe üretme
+## Exe üretme
 
 ```powershell
 pip install pyinstaller
 pyinstaller --onefile --windowed --name SeqDPI seqdpi.py
 ```
 
-Çıktı `dist/SeqDPI.exe` altında oluşur.
+## Notlar
+
+- Bu sürüm sistem proxy'si değil, WinDivert tabanlı paket yakalama kullanır.
+- Erişim engeli DPI tabanlıysa önce `Sistem geneli`, sonra `Alternatif 1`, sonra `Alternatif 2` denenmeli.
+- Roblox erişimi bazı dönemlerde DNS, IP, TLS SNI ve uygulama istemcisi davranışına göre değişebiliyor. Bu yüzden tek DNS değişikliği yetmez.
