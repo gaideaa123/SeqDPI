@@ -1,33 +1,38 @@
 # SeqDPI
 
-SeqDPI, Türkiye için tek butonlu GoodbyeDPI-Turkey GUI'si.
+SeqDPI, Türkiye için tek butonlu Windows DPI yardımcı uygulaması.
 
-Bu sürüm DNS'i öldüren `dnsredir` metodlarını başarı sayma hatasını düzeltir. Kullanıcı logunda `service_install_dnsredir_turkey` başarıyla çalışmasına rağmen tüm alan adları `getaddrinfo failed` dönüyordu. Araştırmada bunun bilinen sınıf olduğu görüldü: `dnsredir` 77.88.8.8:1253 gibi non-standard DNS porta yönlendirir, bazı ağlarda veya güvenlik yazılımlarında bu yol tüm DNS'i kesebilir.
+Bu sürüm çalışan çekirdeği bozmadan paketlemeyi düzeltir: uygulama artık **SeqDPI.exe** olarak, **pencereli modda** ve **CMD konsolu göstermeden** üretilecek şekilde hazırlanmıştır.
 
-## Ne değişti?
+## Çalıştırma
 
-- Önce çalışan DNS profili kurulur: Cloudflare, olmazsa Google, olmazsa Yandex
-- `dnsredir` içeren metodlar artık en sona atılır
-- Manuel `goodbyedpi.exe -9/-8/-7...` no-dnsredir modları önce denenir
-- Her metod başlatıldıktan sonra DNS sağlık kontrolünden geçer
-- DNS ölürse metod kapatılır, DNS tekrar düzeltilir ve sıradaki metoda geçilir
-- Servis başarılı görünse bile DNS bozuksa başarısız sayılır
-- `dnsredir` scriptleri sadece fallback olarak denenir
-- Test raporu artık önce DNS sağlık skorunu, sonra HTTP sonuçlarını basar
-
-## Kullanım
+Geliştirme için:
 
 ```powershell
 python seqdpi.py
 ```
 
-Yönetici izni gerekir.
-
-## Exe üretme
+Exe üretmek için:
 
 ```powershell
-pip install pyinstaller
-pyinstaller --onefile --windowed --name SeqDPI seqdpi.py
+./build_exe.ps1
 ```
 
-Log dosyası: `%APPDATA%/SeqDPI/seqdpi.log`
+Çıktı:
+
+```text
+dist/SeqDPI.exe
+```
+
+## Exe özellikleri
+
+- Dosya adı: `SeqDPI.exe`
+- Konsol yok: PyInstaller `--windowed`
+- Yönetici izni ister: PyInstaller `--uac-admin`
+- Tek dosya: PyInstaller `--onefile`
+- Windows sürüm bilgisi: `version_info.txt`
+- GitHub Actions artifact: `SeqDPI-windows-exe`
+
+## Not
+
+Çalışan ağ/DPI mantığına dokunulmadı. Bu PR sadece dağıtım, isimlendirme ve CMD görünmeden çalışma tarafını cilalar.
