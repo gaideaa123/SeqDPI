@@ -17,7 +17,7 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 WizardResizable=no
-WizardSizePercent=115
+WizardSizePercent=120
 PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -35,14 +35,14 @@ Name: "turkish"; MessagesFile: "compiler:Languages\Turkish.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Messages]
-turkish.WelcomeLabel1=SeqDPI kurulumuna hoş geldin
-turkish.WelcomeLabel2=Next'e bas, gerekli motor kurulsun, masaüstüne SeqDPI gelsin. Sonra tek tuş.
+turkish.WelcomeLabel1=SeqDPI kuruluyor
+turkish.WelcomeLabel2=Next'e bas. Motor, kısayol ve neon arayüz tek seferde hazır.
 turkish.FinishedHeadingLabel=SeqDPI hazır
-turkish.FinishedLabel=Kurulum bitti. Masaüstündeki SeqDPI kısayolundan neon arayüzü açabilirsin.
-english.WelcomeLabel1=Welcome to SeqDPI setup
-english.WelcomeLabel2=Click Next, install the engine, get SeqDPI on your desktop. Then one click.
+turkish.FinishedLabel=Masaüstündeki SeqDPI kısayoluna bas, tek tuşla kullan.
+english.WelcomeLabel1=Installing SeqDPI
+english.WelcomeLabel2=Click Next. Engine, shortcut, and neon UI are prepared in one pass.
 english.FinishedHeadingLabel=SeqDPI is ready
-english.FinishedLabel=Setup is complete. Open SeqDPI from your desktop shortcut.
+english.FinishedLabel=Use the SeqDPI desktop shortcut and start with one click.
 
 [Tasks]
 Name: "desktopicon"; Description: "Masaüstüne SeqDPI kısayolu ekle"; GroupDescription: "Kısayollar:"; Flags: checkedonce
@@ -60,12 +60,16 @@ Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingD
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "SeqDPI'yi aç"; Flags: nowait postinstall skipifsilent; Tasks: launchafter
+Filename: "{app}\{#MyAppExeName}"; Description: "SeqDPI'yi aç"; Flags: nowait postinstall skipifsilent runascurrentuser; Tasks: launchafter
 
 [UninstallDelete]
 Type: files; Name: "{userappdata}\SeqDPI\seqdpi.log"
 
 [Code]
+var
+  HeroTitle: TNewStaticText;
+  HeroSub: TNewStaticText;
+
 procedure RunHidden(FileName: string; Params: string);
 var
   ResultCode: Integer;
@@ -90,22 +94,17 @@ begin
   WizardForm.MainPanel.Color := $221013;
   WizardForm.InnerPage.Color := $361921;
   WizardForm.Bevel.Visible := False;
-
   WizardForm.WizardSmallBitmapImage.Visible := False;
   WizardForm.WizardBitmapImage.Visible := False;
-
   WizardForm.PageNameLabel.Font.Color := $D84FFF;
   WizardForm.PageNameLabel.Font.Style := [fsBold];
   WizardForm.PageDescriptionLabel.Font.Color := $FFD939;
-
   WizardForm.WelcomeLabel1.Font.Color := $FDF7FF;
   WizardForm.WelcomeLabel1.Font.Style := [fsBold];
   WizardForm.WelcomeLabel2.Font.Color := $D4ACB9;
-
   WizardForm.FinishedHeadingLabel.Font.Color := $5CFFB8;
   WizardForm.FinishedHeadingLabel.Font.Style := [fsBold];
   WizardForm.FinishedLabel.Font.Color := $FDF7FF;
-
   WizardForm.NextButton.Caption := 'Next';
   WizardForm.NextButton.Font.Style := [fsBold];
 end;
@@ -119,6 +118,26 @@ end;
 procedure InitializeWizard();
 begin
   PaintSeqDPIWizard();
+  HeroTitle := TNewStaticText.Create(WizardForm);
+  HeroTitle.Parent := WizardForm.WelcomePage;
+  HeroTitle.Left := ScaleX(24);
+  HeroTitle.Top := ScaleY(178);
+  HeroTitle.Width := ScaleX(430);
+  HeroTitle.Height := ScaleY(34);
+  HeroTitle.Caption := 'NEON DNS CONTROL';
+  HeroTitle.Font.Color := $39D9FF;
+  HeroTitle.Font.Size := 15;
+  HeroTitle.Font.Style := [fsBold];
+
+  HeroSub := TNewStaticText.Create(WizardForm);
+  HeroSub.Parent := WizardForm.WelcomePage;
+  HeroSub.Left := ScaleX(24);
+  HeroSub.Top := ScaleY(214);
+  HeroSub.Width := ScaleX(430);
+  HeroSub.Height := ScaleY(48);
+  HeroSub.Caption := 'Sessiz kurulum, masaüstü kısayolu, tek tuşla çalışan SeqDPI.';
+  HeroSub.Font.Color := $FFF7DF;
+  HeroSub.Font.Size := 10;
 end;
 
 procedure CurPageChanged(CurPageID: Integer);
@@ -128,8 +147,7 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-  if CurStep = ssInstall then
-    StopSeqDPIStuff();
+  if CurStep = ssInstall then StopSeqDPIStuff();
 end;
 
 function InitializeUninstall(): Boolean;
@@ -140,6 +158,5 @@ end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
-  if CurUninstallStep = usUninstall then
-    StopSeqDPIStuff();
+  if CurUninstallStep = usUninstall then StopSeqDPIStuff();
 end;
