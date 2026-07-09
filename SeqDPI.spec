@@ -3,7 +3,7 @@
 block_cipher = None
 
 a = Analysis(
-    ['seqdpi.py'],
+    ['SeqDPI.pyw'],
     pathex=[],
     binaries=[],
     datas=[],

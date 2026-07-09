@@ -10,7 +10,7 @@ if (Test-Path build) { Remove-Item build -Recurse -Force }
 python -m pip install --upgrade pip
 python -m pip install pyinstaller
 
-Write-Host "[SeqDPI] Building windowed admin exe..."
+Write-Host "[SeqDPI] Building colorful windowed admin exe..."
 pyinstaller `
   --noconfirm `
   --clean `
@@ -19,6 +19,6 @@ pyinstaller `
   --name SeqDPI `
   --uac-admin `
   --version-file version_info.txt `
-  seqdpi.py
+  SeqDPI.pyw
 
 Write-Host "[SeqDPI] Done: dist\SeqDPI.exe"
