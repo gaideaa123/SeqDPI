@@ -1,4 +1,4 @@
-name: Build SeqDPI Windows EXE
+name: Build SeqDPI Windows Installer
 
 on:
   workflow_dispatch:
@@ -19,12 +19,22 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Build windowed EXE
+      - name: Install Inno Setup
         shell: pwsh
-        run: ./build_exe.ps1
+        run: choco install innosetup -y
 
-      - name: Upload SeqDPI.exe
+      - name: Build SeqDPI setup wizard
+        shell: pwsh
+        run: ./build_installer.ps1
+
+      - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: SeqDPI-windows-exe
+          name: SeqDPI-Setup
+          path: dist/installer/SeqDPI-Setup.exe
+
+      - name: Upload raw exe for debugging
+        uses: actions/upload-artifact@v4
+        with:
+          name: SeqDPI-raw-exe
           path: dist/SeqDPI.exe
