@@ -29,6 +29,7 @@ DOWNLOAD_ZIP = APP_DIR / "goodbyedpi-0.2.3rc3-turkey.zip"
 LOG_FILE = APP_DIR / "seqdpi.log"
 STATE_FILE = APP_DIR / "state.json"
 TURKEY_MARKER = ENGINE_DIR / "engine-is-turkey-release.json"
+DISCORD_LIST = APP_DIR / "discord-hosts.txt"
 TURKEY_RELEASE_API = "https://api.github.com/repos/cagritaskn/GoodbyeDPI-Turkey/releases/latest"
 SERVICE_NAME = "GoodbyeDPI"
 QUIC_RULE = "SeqDPI Block QUIC HTTP3"
@@ -41,8 +42,31 @@ DNS_PROFILES = [
     ("Google", ["8.8.8.8", "8.8.4.4", "2001:4860:4860::8888", "2001:4860:4860::8844"]),
     ("Yandex", ["77.88.8.8", "77.88.8.1", "2a02:6b8::feed:0ff", "2a02:6b8:0:1::feed:0ff"]),
 ]
-CHECK_HOSTS = ["wikipedia.org", "discord.com", "gateway.discord.gg", "roblox.com", "www.roblox.com", "auth.roblox.com", "games.roblox.com"]
-CHECK_URLS = [("Roblox", "https://www.roblox.com/"), ("Discord", "https://discord.com/"), ("Wikipedia", "https://www.wikipedia.org/")]
+
+DISCORD_HOSTS = [
+    "discord.com",
+    "gateway.discord.gg",
+    "cdn.discordapp.com",
+    "media.discordapp.net",
+    "images-ext-1.discordapp.net",
+    "discordapp.com",
+    "discordapp.net",
+    "discord.gg",
+    "updates.discord.com",
+    "dl.discordapp.net",
+    "discordstatus.com",
+    "dis.gd",
+]
+ROBLOX_HOSTS = ["roblox.com", "www.roblox.com", "auth.roblox.com", "games.roblox.com"]
+CHECK_HOSTS = ["wikipedia.org", *DISCORD_HOSTS[:8], *ROBLOX_HOSTS]
+CHECK_URLS = [
+    ("Discord web", "https://discord.com/"),
+    ("Discord gateway", "https://gateway.discord.gg/"),
+    ("Discord update", "https://updates.discord.com/distributions/app/manifests/latest?channel=stable&platform=win&arch=x64"),
+    ("Discord CDN", "https://cdn.discordapp.com/"),
+    ("Roblox", "https://www.roblox.com/"),
+    ("Wikipedia", "https://www.wikipedia.org/"),
+]
 QUICK_LINKS = {"Roblox": "https://www.roblox.com/", "Discord": "https://discord.com/app"}
 
 
@@ -56,6 +80,7 @@ class Method:
     needs_enter: bool = False
     dns_redir: bool = False
     service: bool = False
+    discord_targeted: bool = False
 
 
 class UiLog:
@@ -176,10 +201,10 @@ class DnsManager:
         for label, servers in DNS_PROFILES:
             try:
                 self.set_servers(label, servers)
-                if dns_resolves("wikipedia.org") or dns_resolves("discord.com"):
+                if dns_resolves("discord.com") and (dns_resolves("wikipedia.org") or dns_resolves("roblox.com")):
                     self.log(f"DNS sağlık kontrolü OK: {label}")
                     return label
-                errors.append(f"{label}: çözümleme yok")
+                errors.append(f"{label}: Discord DNS yok")
             except Exception as exc:
                 errors.append(f"{label}: {exc}")
         raise RuntimeError("Hiçbir DNS profili çalışmadı: " + " | ".join(errors))
@@ -327,21 +352,43 @@ class MethodDiscovery:
 
     def discover(self):
         self.package.ensure()
-        methods = self.manual_methods() + self.script_methods()
+        self.write_discord_list()
+        methods = self.discord_targeted_methods() + self.manual_methods() + self.script_methods()
         methods.sort(key=lambda m: m.score, reverse=True)
         if not methods:
             raise RuntimeError("Çalıştırılacak metod bulunamadı.")
         self.log(f"{len(methods)} metod bulundu.")
-        for method in methods[:12]:
-            tag = "dnsredir" if method.dns_redir else "dns-safe"
+        for method in methods[:14]:
+            tag = "discord" if method.discord_targeted else ("dnsredir" if method.dns_redir else "general")
             self.log(f"Metod: {method.name} ({tag})")
+        return methods
+
+    def write_discord_list(self):
+        APP_DIR.mkdir(parents=True, exist_ok=True)
+        hosts = [*DISCORD_HOSTS, *ROBLOX_HOSTS]
+        DISCORD_LIST.write_text("\n".join(dict.fromkeys(hosts)) + "\n", encoding="utf-8")
+
+    def discord_targeted_methods(self):
+        exe = self.package.exe()
+        if not exe:
+            return []
+        presets = ["-9", "-8", "-7", "-6", "-5", "-2"]
+        methods = []
+        for i, p in enumerate(presets):
+            methods.append(Method(
+                f"discord targeted {p}",
+                exe,
+                "exe",
+                [str(exe), p, "--blacklist", str(DISCORD_LIST), "--allow-no-sni"],
+                3000 - i,
+                discord_targeted=True,
+            ))
         return methods
 
     def manual_methods(self):
         exe = self.package.exe()
         if not exe:
             return []
-        # Manual no-dnsredir modes are first now. The user's log proves dnsredir can kill all DNS.
         presets = ["-9", "-8", "-7", "-6", "-5", "-2", "-1"]
         return [Method(f"manual {p} no dnsredir", exe, "exe", [str(exe), p], 2000 - i, dns_redir=False) for i, p in enumerate(presets)]
 
@@ -368,15 +415,19 @@ class MethodDiscovery:
         if not dns_redir:
             score += 1000
         else:
-            score -= 400
-        if "alternative2" in stem or "alternative4" in stem:
-            score += 300
+            score -= 250
+        if "alternative4" in stem:
+            score += 450
+        if "alternative2" in stem:
+            score += 350
+        if "alternative3" in stem or "alternative5" in stem:
+            score += 180
         if "superonline" in stem:
-            score += 100
+            score += 140
         if stem == "turkey_dnsredir":
-            score += 150
+            score += 120
         if service:
-            score -= 100
+            score -= 120
         return Method(script.stem.replace("_", " "), script, "script", ["cmd.exe", "/d", "/c", str(script)], score, needs_enter, dns_redir, service)
 
 
@@ -390,17 +441,33 @@ class Health:
             if dns_resolves(host):
                 ok += 1
         self.log(f"DNS sağlık skoru: {ok}/3")
-        return ok >= 1
+        return ok >= 2 and dns_resolves("discord.com")
+
+    def discord_ok(self):
+        if not dns_resolves("discord.com"):
+            self.log("Discord sağlık: DNS yok")
+            return False
+        probes = [
+            ("Discord web", "https://discord.com/"),
+            ("Discord gateway", "https://gateway.discord.gg/"),
+            ("Discord update", "https://updates.discord.com/distributions/app/manifests/latest?channel=stable&platform=win&arch=x64"),
+            ("Discord CDN", "https://cdn.discordapp.com/"),
+        ]
+        ok_count = 0
+        for name, url in probes:
+            ok, detail = http_probe(url)
+            self.log(f"{'OK' if ok else 'FAIL'} {name} ({detail})")
+            if ok:
+                ok_count += 1
+        self.log(f"Discord sağlık skoru: {ok_count}/{len(probes)}")
+        return ok_count >= 2
 
     def full_report(self):
         for host in CHECK_HOSTS:
-            if dns_resolves(host):
-                self.log(f"OK  DNS {host}")
-            else:
-                self.log(f"FAIL DNS {host}")
+            self.log(f"{'OK' if dns_resolves(host) else 'FAIL'} DNS {host}")
         for name, url in CHECK_URLS:
             ok, detail = http_probe(url)
-            self.log(f"{'OK' if ok else 'FAIL'}  {name} ({detail})")
+            self.log(f"{'OK' if ok else 'FAIL'} {name} ({detail})")
 
 
 class EngineLauncher:
@@ -439,18 +506,18 @@ class EngineLauncher:
             method = self.methods[self.index]
             try:
                 self.launch(method)
-                if self.health.dns_ok():
-                    self.log(f"Aktif yöntem sağlıklı: {method.name}")
+                if self.health.dns_ok() and self.health.discord_ok():
+                    self.log(f"Aktif yöntem Discord sağlıklı: {method.name}")
                     STATE_FILE.write_text(json.dumps({"method": method.name, "time": time.time()}, ensure_ascii=False, indent=2), encoding="utf-8")
                     return method
-                raise RuntimeError("DNS öldü, bu metod reddedildi")
+                raise RuntimeError("Discord sağlık kontrolü geçmedi")
             except Exception as exc:
                 errors.append(f"{method.name}: {exc}")
                 self.log(f"Metod başarısız/reddedildi: {method.name}: {exc}")
                 self.stop_runtime_only()
                 self.dns.establish_working_dns()
                 self.index = (self.index + 1) % len(self.methods)
-        raise RuntimeError("Sağlıklı metod bulunamadı:\n" + "\n".join(errors[-8:]))
+        raise RuntimeError("Discord için sağlıklı metod bulunamadı:\n" + "\n".join(errors[-10:]))
 
     def launch(self, method):
         self.log(f"Başlatılıyor: {method.name}")
@@ -580,153 +647,56 @@ class SeqDPIApp(tk.Tk):
         self.logger = UiLog(self.append_log)
         self.engine = EngineLauncher(self.logger)
         self.health = Health(self.logger)
-        self.configure_window()
+        self.title(APP_NAME)
+        self.geometry("760x520")
+        self.configure(bg="#f7f5ef")
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.build_ui()
         self.after(250, self.initial_check)
 
-    def configure_window(self):
-        self.title(APP_NAME)
-        self.geometry("900x680")
-        self.minsize(780, 580)
-        self.configure(bg="#f7f5ef")
-        self.protocol("WM_DELETE_WINDOW", self.on_close)
-        style = ttk.Style(self)
-        style.theme_use("clam")
-        style.configure("TFrame", background="#f7f5ef")
-        style.configure("Muted.TLabel", background="#f7f5ef", foreground="#6f685f", font=("Segoe UI", 10))
-        style.configure("Title.TLabel", background="#f7f5ef", foreground="#211d18", font=("Segoe UI Semibold", 24))
-        style.configure("Body.TLabel", background="#f7f5ef", foreground="#3a342d", font=("Segoe UI", 11))
-        style.configure("Status.TLabel", background="#efe8dd", foreground="#2b261f", font=("Segoe UI Semibold", 11), padding=12)
-        style.configure("Action.TButton", font=("Segoe UI Semibold", 14), padding=(22, 14))
-        style.configure("Ghost.TButton", font=("Segoe UI", 10), padding=(14, 9))
-
     def build_ui(self):
-        shell = ttk.Frame(self, padding=(34, 30, 34, 26))
+        shell = ttk.Frame(self, padding=24)
         shell.pack(fill="both", expand=True)
-        ttk.Label(shell, text="DNS HEALTH-GATED DPI", style="Muted.TLabel").pack(anchor="w")
-        ttk.Label(shell, text="DNS’i öldüren metod otomatik elenir", style="Title.TLabel").pack(anchor="w", pady=(6, 0))
-        ttk.Label(shell, text="Önce sağlam DNS kurar, DNS redirection yerine no-dnsredir manuel modları dener, her metodu DNS sağlık kontrolünden geçirir. DNS ölürse metodu kapatıp sıradakine geçer.", style="Body.TLabel", wraplength=780).pack(anchor="w", pady=(10, 24))
-
+        ttk.Label(shell, text="SeqDPI", font=("Segoe UI Semibold", 24)).pack(anchor="w")
+        ttk.Label(shell, text="Discord health-gated core", font=("Segoe UI", 11)).pack(anchor="w", pady=(4, 18))
         actions = ttk.Frame(shell)
-        actions.pack(fill="x", pady=(0, 20))
-        self.main_button = ttk.Button(actions, text="Erişim engelini aç", style="Action.TButton", command=self.enable)
-        self.main_button.pack(side="left")
-        self.next_button = ttk.Button(actions, text="Sıradaki yöntem", style="Ghost.TButton", command=self.next_method)
-        self.next_button.pack(side="left", padx=(12, 0))
-        self.test_button = ttk.Button(actions, text="Test et", style="Ghost.TButton", command=self.test)
-        self.test_button.pack(side="left", padx=(12, 0))
-        self.restore_button = ttk.Button(actions, text="Tamamen kapat", style="Ghost.TButton", command=self.restore)
-        self.restore_button.pack(side="left", padx=(12, 0))
-        ttk.Button(actions, text="Roblox", style="Ghost.TButton", command=lambda: self.open_link("Roblox")).pack(side="right", padx=(8, 0))
-        ttk.Button(actions, text="Discord", style="Ghost.TButton", command=lambda: self.open_link("Discord")).pack(side="right")
-
-        self.status = ttk.Label(shell, text="Hazırlanıyor", style="Status.TLabel")
-        self.status.pack(fill="x", pady=(0, 18))
-        ttk.Label(shell, text="İşlem günlüğü", style="Muted.TLabel").pack(anchor="w", pady=(0, 8))
-        frame = tk.Frame(shell, bg="#2b261f")
-        frame.pack(fill="both", expand=True)
-        self.log_box = tk.Text(frame, bg="#2b261f", fg="#f3ede3", insertbackground="#f3ede3", relief="flat", padx=18, pady=16, font=("Cascadia Mono", 10), wrap="word")
-        self.log_box.pack(fill="both", expand=True)
+        actions.pack(fill="x")
+        ttk.Button(actions, text="Erişimi aç", command=self.enable).pack(side="left")
+        ttk.Button(actions, text="Sıradaki", command=self.next_method).pack(side="left", padx=8)
+        ttk.Button(actions, text="Test", command=self.test).pack(side="left", padx=8)
+        ttk.Button(actions, text="Kapat", command=self.restore).pack(side="left", padx=8)
+        self.log_box = tk.Text(shell, height=18, wrap="word")
+        self.log_box.pack(fill="both", expand=True, pady=(18, 0))
         self.log_box.configure(state="disabled")
 
     def initial_check(self):
         if not is_windows():
-            self.set_status("Bu sürüm Windows için.")
-            self.disable_all()
-            return
-        if not is_admin():
-            self.set_status("Yönetici izni gerekiyor.")
-            self.logger("DNS, firewall ve WinDivert için yönetici izni şart.")
-            self.main_button.configure(text="Yönetici olarak aç", command=self.elevate)
-            return
-        self.set_status("Hazır. DNS sağlık kontrollü mod kullanılacak.")
-        self.logger("Yönetici izni tamam. DNS’i öldüren dnsredir metodları artık başarı sayılmayacak.")
+            self.logger("Windows gerekli.")
+        elif not is_admin():
+            self.logger("Yönetici izni gerekiyor.")
+        else:
+            self.logger("Hazır. Discord sağlık kontrolü aktif.")
 
-    def elevate(self):
-        try:
-            relaunch_as_admin()
-            self.destroy()
-        except Exception as exc:
-            messagebox.showerror(APP_NAME, f"Yönetici olarak açılamadı:\n{exc}")
+    def run_job(self, target):
+        def worker():
+            try:
+                target()
+            except Exception as exc:
+                self.logger(f"Hata: {exc}")
+                self.after(0, lambda: messagebox.showerror(APP_NAME, str(exc)))
+        threading.Thread(target=worker, daemon=True).start()
 
     def enable(self):
-        self.run_background(self.enable_work)
-
-    def enable_work(self):
-        try:
-            self.set_status("Açılıyor")
-            method = self.engine.start()
-            self.logger(f"Aktif yöntem: {method.name}")
-            self.health.full_report()
-            self.set_status("Aktif. DNS sağlıklı.")
-        except Exception as exc:
-            self.logger(f"Hata: {exc}")
-            self.set_status("Hata verdi, logu oku")
-            messagebox.showerror(APP_NAME, str(exc))
-        finally:
-            self.set_busy(False)
+        self.run_job(lambda: self.logger(f"Aktif yöntem: {self.engine.start().name}"))
 
     def next_method(self):
-        self.run_background(self.next_work)
-
-    def next_work(self):
-        try:
-            self.set_status("Sıradaki yöntem deneniyor")
-            method = self.engine.next()
-            self.logger(f"Aktif yöntem: {method.name}")
-            self.health.full_report()
-            self.set_status("Alternatif aktif.")
-        except Exception as exc:
-            self.logger(f"Hata: {exc}")
-            self.set_status("Alternatif başarısız")
-            messagebox.showerror(APP_NAME, str(exc))
-        finally:
-            self.set_busy(False)
+        self.run_job(lambda: self.logger(f"Aktif yöntem: {self.engine.next().name}"))
 
     def test(self):
-        self.run_background(self.health.full_report)
+        self.run_job(self.health.full_report)
 
     def restore(self):
-        self.run_background(self.restore_work)
-
-    def restore_work(self):
-        try:
-            self.set_status("Kapatılıyor")
-            self.engine.stop_all()
-            self.set_status("Kapandı. Eski ağ profilindesin.")
-        except Exception as exc:
-            self.logger(f"Kapatma hatası: {exc}")
-            messagebox.showerror(APP_NAME, str(exc))
-        finally:
-            self.set_busy(False)
-
-    def run_background(self, target):
-        self.set_busy(True)
-        threading.Thread(target=target, daemon=True).start()
-
-    def open_link(self, name):
-        import webbrowser
-        webbrowser.open(QUICK_LINKS[name])
-
-    def on_close(self):
-        if messagebox.askyesno(APP_NAME, "Kapatırken motoru durdurup DNS/firewall ayarlarını geri alayım mı?"):
-            try:
-                self.engine.stop_all()
-            except Exception:
-                pass
-        self.destroy()
-
-    def set_busy(self, busy):
-        state = "disabled" if busy else "normal"
-        for button in (self.main_button, self.next_button, self.test_button, self.restore_button):
-            button.configure(state=state)
-
-    def disable_all(self):
-        for button in (self.main_button, self.next_button, self.test_button, self.restore_button):
-            button.configure(state="disabled")
-
-    def set_status(self, text):
-        self.after(0, lambda: self.status.configure(text=text))
+        self.run_job(self.engine.stop_all)
 
     def append_log(self, message):
         def append():
@@ -735,6 +705,9 @@ class SeqDPIApp(tk.Tk):
             self.log_box.see("end")
             self.log_box.configure(state="disabled")
         self.after(0, append)
+
+    def on_close(self):
+        self.destroy()
 
 
 if __name__ == "__main__":
