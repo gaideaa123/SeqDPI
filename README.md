@@ -2,7 +2,7 @@
 
 SeqDPI, Türkiye için tek butonlu Windows DPI yardımcı uygulaması.
 
-Bu sürüm çalışan çekirdeği bozmadan paketlemeyi düzeltir: uygulama artık **SeqDPI.exe** olarak, **pencereli modda** ve **CMD konsolu göstermeden** üretilecek şekilde hazırlanmıştır.
+Bu sürüm çalışan çekirdeği bozmadan paketlemeyi düzeltir: uygulama artık **SeqDPI.exe** olarak, **pencereli modda** ve **CMD konsolu göstermeden** üretilecek şekilde hazırlanmıştır. Python kurulu sistemlerde `SeqDPI.pyw` de konsolsuz açılır.
 
 ## Çalıştırma
 
@@ -10,6 +10,12 @@ Geliştirme için:
 
 ```powershell
 python seqdpi.py
+```
+
+Konsolsuz Python çalıştırma:
+
+```powershell
+pythonw SeqDPI.pyw
 ```
 
 Exe üretmek için:
