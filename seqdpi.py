@@ -4,15 +4,13 @@ import os
 import re
 import shutil
 import socket
+import ssl
 import subprocess
 import sys
-import threading
 import time
-import tkinter as tk
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from tkinter import messagebox, ttk
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -23,8 +21,8 @@ except ImportError:
 
 APP_NAME = "SeqDPI"
 APP_DIR = Path(os.getenv("APPDATA", str(Path.home()))) / APP_NAME
-LEGACY_ENGINE_DIR = APP_DIR / "engine"
 ENGINE_DIR = APP_DIR / "engine-turkey-current"
+LEGACY_ENGINE_DIR = APP_DIR / "engine"
 DOWNLOAD_ZIP = APP_DIR / "goodbyedpi-0.2.3rc3-turkey.zip"
 LOG_FILE = APP_DIR / "seqdpi.log"
 STATE_FILE = APP_DIR / "state.json"
@@ -42,23 +40,13 @@ DNS_PROFILES = [
     ("Google", ["8.8.8.8", "8.8.4.4", "2001:4860:4860::8888", "2001:4860:4860::8844"]),
     ("Yandex", ["77.88.8.8", "77.88.8.1", "2a02:6b8::feed:0ff", "2a02:6b8:0:1::feed:0ff"]),
 ]
-
 DISCORD_HOSTS = [
-    "discord.com",
-    "gateway.discord.gg",
-    "cdn.discordapp.com",
-    "media.discordapp.net",
-    "images-ext-1.discordapp.net",
-    "discordapp.com",
-    "discordapp.net",
-    "discord.gg",
-    "updates.discord.com",
-    "dl.discordapp.net",
-    "discordstatus.com",
-    "dis.gd",
+    "discord.com", "gateway.discord.gg", "cdn.discordapp.com", "media.discordapp.net",
+    "images-ext-1.discordapp.net", "discordapp.com", "discordapp.net", "discord.gg",
+    "updates.discord.com", "dl.discordapp.net", "discordstatus.com", "dis.gd",
 ]
 ROBLOX_HOSTS = ["roblox.com", "www.roblox.com", "auth.roblox.com", "games.roblox.com"]
-CHECK_HOSTS = ["wikipedia.org", *DISCORD_HOSTS[:8], *ROBLOX_HOSTS]
+CHECK_HOSTS = ["wikipedia.org", *DISCORD_HOSTS[:10], *ROBLOX_HOSTS]
 CHECK_URLS = [
     ("Discord web", "https://discord.com/"),
     ("Discord gateway", "https://gateway.discord.gg/"),
@@ -69,19 +57,14 @@ CHECK_URLS = [
 ]
 QUICK_LINKS = {"Roblox": "https://www.roblox.com/", "Discord": "https://discord.com/app"}
 
-
 @dataclass
 class Method:
     name: str
     path: Path
-    kind: str
     command: list[str]
     score: int
-    needs_enter: bool = False
-    dns_redir: bool = False
     service: bool = False
-    discord_targeted: bool = False
-
+    dns_redir: bool = False
 
 class UiLog:
     def __init__(self, callback):
@@ -91,12 +74,11 @@ class UiLog:
     def __call__(self, message):
         stamp = time.strftime("%Y-%m-%d %H:%M:%S")
         try:
-            with LOG_FILE.open("a", encoding="utf-8") as f:
-                f.write(f"[{stamp}] {message}\n")
+            with LOG_FILE.open("a", encoding="utf-8") as file:
+                file.write(f"[{stamp}] {message}\n")
         except OSError:
             pass
         self.callback(message)
-
 
 class Runner:
     def run(self, args, timeout=60, check=False, cwd=None, input_text=None):
@@ -106,7 +88,7 @@ class Runner:
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             flags = CREATE_NO_WINDOW
-        p = subprocess.run(
+        completed = subprocess.run(
             args,
             input=input_text,
             capture_output=True,
@@ -118,14 +100,13 @@ class Runner:
             creationflags=flags,
             cwd=str(cwd) if cwd else None,
         )
-        out = (p.stdout + p.stderr).strip()
-        if check and p.returncode != 0:
-            raise RuntimeError(out or f"Komut başarısız: {args[0]}")
-        return p.returncode, out
+        output = (completed.stdout + completed.stderr).strip()
+        if check and completed.returncode != 0:
+            raise RuntimeError(output or f"Komut başarısız: {args[0]}")
+        return completed.returncode, output
 
     def ps(self, command, timeout=60, check=False):
         return self.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command], timeout=timeout, check=check)
-
 
 class ProcessCleaner:
     def __init__(self, runner, log):
@@ -134,9 +115,9 @@ class ProcessCleaner:
 
     def before_launch(self):
         self.stop_service()
-        self.kill_seqdpi_engine_processes()
+        self.kill_engine_processes()
         self.kill_goodbyedpi()
-        self.stop_windivert_best_effort()
+        self.stop_windivert()
 
     def stop_service(self):
         self.runner.run(["sc", "stop", SERVICE_NAME], timeout=12)
@@ -147,22 +128,21 @@ class ProcessCleaner:
         self.runner.run(["taskkill", "/IM", "goodbyedpi.exe", "/F", "/T"], timeout=12)
         self.log("goodbyedpi.exe süreçleri kapatıldı.")
 
-    def kill_seqdpi_engine_processes(self):
+    def kill_engine_processes(self):
         needle = str(APP_DIR).replace("'", "''")
         pid = os.getpid()
-        cmd = (
-            f"$needle = '{needle}'; "
+        command = (
+            f"$needle='{needle}'; "
             f"Get-CimInstance Win32_Process | Where-Object {{ $_.ProcessId -ne {pid} -and $_.CommandLine -and $_.CommandLine.Contains($needle) }} | "
             "ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {} }"
         )
-        self.runner.ps(cmd, timeout=20)
+        self.runner.ps(command, timeout=20)
         self.log("SeqDPI engine klasörünü tutan eski süreçler kapatıldı.")
 
-    def stop_windivert_best_effort(self):
+    def stop_windivert(self):
         for name in ("WinDivert", "WinDivert1.4", "WinDivert2.2", "windivert", "windivert14"):
             self.runner.run(["sc", "stop", name], timeout=5)
         self.log("WinDivert kilitleri best-effort durduruldu.")
-
 
 class DnsManager:
     def __init__(self, runner, log):
@@ -170,21 +150,24 @@ class DnsManager:
         self.log = log
 
     def adapters(self):
-        _, out = self.runner.ps("Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | Select-Object -ExpandProperty Name", check=True)
-        names = [x.strip() for x in out.splitlines() if x.strip()]
-        if not names:
-            raise RuntimeError("Aktif ağ adaptörü bulamadım.")
+        _, out = self.runner.ps("Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | Select-Object -ExpandProperty Name")
+        names = [line.strip() for line in out.splitlines() if line.strip()]
         return names
 
     def set_servers(self, label, servers):
         names = self.adapters()
-        quoted = ",".join(f"'{s}'" for s in servers)
+        if not names:
+            self.log("Aktif ağ adaptörü bulunamadı, DNS ayarı atlandı.")
+            return False
+        quoted = ",".join(f"'{server}'" for server in servers)
+        ok = False
         for name in names:
             safe = name.replace("'", "''")
-            self.runner.ps(f"Set-DnsClientServerAddress -InterfaceAlias '{safe}' -ServerAddresses ({quoted})", check=True)
+            code, out = self.runner.ps(f"Set-DnsClientServerAddress -InterfaceAlias '{safe}' -ServerAddresses ({quoted})")
+            ok = ok or code == 0
         self.flush()
         self.log(f"DNS {label} olarak ayarlandı: {', '.join(names)}")
-        return names
+        return ok
 
     def restore(self):
         for name in self.adapters():
@@ -196,19 +179,35 @@ class DnsManager:
     def flush(self):
         self.runner.run(["ipconfig", "/flushdns"], timeout=15)
 
+    def dns_is_ok(self):
+        return dns_resolves("discord.com") or dns_resolves("roblox.com") or dns_resolves("wikipedia.org")
+
     def establish_working_dns(self):
+        # Critical change: DNS preflight is advisory. Some networks block every public resolver,
+        # but a DPI method can still be useful. Never stop startup here.
+        if self.dns_is_ok():
+            self.log("Mevcut DNS zaten çalışıyor, değiştirmeden devam.")
+            return "current"
         errors = []
         for label, servers in DNS_PROFILES:
             try:
                 self.set_servers(label, servers)
-                if dns_resolves("discord.com") and (dns_resolves("wikipedia.org") or dns_resolves("roblox.com")):
+                if self.dns_is_ok():
                     self.log(f"DNS sağlık kontrolü OK: {label}")
                     return label
-                errors.append(f"{label}: Discord DNS yok")
+                errors.append(f"{label}: çözümleme yok")
             except Exception as exc:
                 errors.append(f"{label}: {exc}")
-        raise RuntimeError("Hiçbir DNS profili çalışmadı: " + " | ".join(errors))
-
+        try:
+            self.restore()
+            if self.dns_is_ok():
+                self.log("DNS otomatik profil ile çalıştı.")
+                return "automatic"
+        except Exception as exc:
+            errors.append(f"automatic: {exc}")
+        self.log("Uyarı: hiçbir DNS profili doğrulanamadı, ama motor yine denenecek.")
+        self.log("DNS deneme özeti: " + " | ".join(errors[-4:]))
+        return "unverified"
 
 class WindowsTweaks:
     def __init__(self, runner, log):
@@ -253,7 +252,6 @@ class WindowsTweaks:
                 pass
         self.log("Chrome/Edge Kyber policy kapatıldı.")
 
-
 class TurkeyPackage:
     def __init__(self, runner, cleaner, log):
         self.runner = runner
@@ -261,7 +259,7 @@ class TurkeyPackage:
         self.log = log
 
     def ensure(self):
-        self.cleanup_legacy_best_effort()
+        self.cleanup_legacy()
         if self.valid():
             self.log("GoodbyeDPI-Turkey paketi hazır.")
             return
@@ -321,21 +319,16 @@ class TurkeyPackage:
     def safe_remove(self, path):
         if not path.exists():
             return
-        trash = APP_DIR / f"trash-{path.name}-{int(time.time())}"
         try:
+            trash = APP_DIR / f"trash-{path.name}-{int(time.time())}"
             path.rename(trash)
-            shutil.rmtree(trash, onerror=self.remove_error)
-        except OSError as exc:
-            self.log(f"Kilitli klasör silinemedi, reboot'a bırakıldı: {path.name} ({exc})")
+            shutil.rmtree(trash, onerror=lambda f, p, e: (os.chmod(p, 0o700), f(p)))
+        except OSError:
             self.delete_on_reboot(path)
 
-    def cleanup_legacy_best_effort(self):
+    def cleanup_legacy(self):
         if LEGACY_ENGINE_DIR.exists():
             self.safe_remove(LEGACY_ENGINE_DIR)
-
-    def remove_error(self, func, path, _):
-        os.chmod(path, 0o700)
-        func(path)
 
     def delete_on_reboot(self, path):
         if os.name == "nt":
@@ -343,7 +336,6 @@ class TurkeyPackage:
                 ctypes.windll.kernel32.MoveFileExW(str(path), None, MOVEFILE_DELAY_UNTIL_REBOOT)
             except Exception:
                 pass
-
 
 class MethodDiscovery:
     def __init__(self, package, log):
@@ -353,13 +345,11 @@ class MethodDiscovery:
     def discover(self):
         self.package.ensure()
         self.write_discord_list()
-        methods = self.discord_targeted_methods() + self.manual_methods() + self.script_methods()
+        methods = self.discord_safe_methods() + self.script_methods()
         methods.sort(key=lambda m: m.score, reverse=True)
-        if not methods:
-            raise RuntimeError("Çalıştırılacak metod bulunamadı.")
         self.log(f"{len(methods)} metod bulundu.")
         for method in methods[:14]:
-            tag = "discord" if method.discord_targeted else ("dnsredir" if method.dns_redir else "general")
+            tag = "dnsredir" if method.dns_redir else "safe"
             self.log(f"Metod: {method.name} ({tag})")
         return methods
 
@@ -368,91 +358,55 @@ class MethodDiscovery:
         hosts = [*DISCORD_HOSTS, *ROBLOX_HOSTS]
         DISCORD_LIST.write_text("\n".join(dict.fromkeys(hosts)) + "\n", encoding="utf-8")
 
-    def discord_targeted_methods(self):
+    def discord_safe_methods(self):
         exe = self.package.exe()
         if not exe:
             return []
-        presets = ["-9", "-8", "-7", "-6", "-5", "-2"]
+        presets = ["-2", "-1", "-4", "-6", "-5", "-7", "-8", "-9"]
         methods = []
         for i, p in enumerate(presets):
-            methods.append(Method(
-                f"discord targeted {p}",
-                exe,
-                "exe",
-                [str(exe), p, "--blacklist", str(DISCORD_LIST), "--allow-no-sni"],
-                3000 - i,
-                discord_targeted=True,
-            ))
+            methods.append(Method(f"discord safe {p}", exe, [str(exe), p, "--blacklist", str(DISCORD_LIST)], 4000 - i))
+            methods.append(Method(f"manual {p}", exe, [str(exe), p], 2500 - i))
         return methods
-
-    def manual_methods(self):
-        exe = self.package.exe()
-        if not exe:
-            return []
-        presets = ["-9", "-8", "-7", "-6", "-5", "-2", "-1"]
-        return [Method(f"manual {p} no dnsredir", exe, "exe", [str(exe), p], 2000 - i, dns_redir=False) for i, p in enumerate(presets)]
 
     def script_methods(self):
         methods = []
         for script in self.package.scripts():
-            m = self.script_to_method(script)
-            if m:
-                methods.append(m)
+            lower = script.name.lower()
+            if "russia" in lower or "blacklist" in lower or "remove" in lower or "uninstall" in lower:
+                continue
+            stem = script.stem.lower()
+            if "turkey" not in stem and "any_country" not in stem:
+                continue
+            content = read_text(script).lower()
+            dns_redir = "--dns-addr" in content or "--dns-port" in content
+            service = "service_install" in stem
+            score = -200 if dns_redir else 1000
+            if "alternative4" in stem:
+                score += 450
+            if "alternative2" in stem:
+                score += 350
+            if "superonline" in stem:
+                score += 120
+            if service:
+                score -= 120
+            methods.append(Method(script.stem.replace("_", " "), script, ["cmd.exe", "/d", "/c", str(script)], score, service=service, dns_redir=dns_redir))
         return methods
-
-    def script_to_method(self, script):
-        lower = script.name.lower()
-        if "russia" in lower or "blacklist" in lower or "remove" in lower or "uninstall" in lower:
-            return None
-        stem = script.stem.lower()
-        if "turkey" not in stem and "any_country" not in stem:
-            return None
-        content = read_text(script).lower()
-        dns_redir = "--dns-addr" in content or "--dns-port" in content
-        service = "service_install" in stem
-        needs_enter = service or "pause" in content
-        score = 0
-        if not dns_redir:
-            score += 1000
-        else:
-            score -= 250
-        if "alternative4" in stem:
-            score += 450
-        if "alternative2" in stem:
-            score += 350
-        if "alternative3" in stem or "alternative5" in stem:
-            score += 180
-        if "superonline" in stem:
-            score += 140
-        if stem == "turkey_dnsredir":
-            score += 120
-        if service:
-            score -= 120
-        return Method(script.stem.replace("_", " "), script, "script", ["cmd.exe", "/d", "/c", str(script)], score, needs_enter, dns_redir, service)
-
 
 class Health:
     def __init__(self, log):
         self.log = log
 
     def dns_ok(self):
-        ok = 0
-        for host in ("wikipedia.org", "discord.com", "roblox.com"):
-            if dns_resolves(host):
-                ok += 1
+        ok = sum(1 for host in ("discord.com", "roblox.com", "wikipedia.org") if dns_resolves(host))
         self.log(f"DNS sağlık skoru: {ok}/3")
-        return ok >= 2 and dns_resolves("discord.com")
+        return ok >= 1
 
     def discord_ok(self):
         if not dns_resolves("discord.com"):
             self.log("Discord sağlık: DNS yok")
             return False
-        probes = [
-            ("Discord web", "https://discord.com/"),
-            ("Discord gateway", "https://gateway.discord.gg/"),
-            ("Discord update", "https://updates.discord.com/distributions/app/manifests/latest?channel=stable&platform=win&arch=x64"),
-            ("Discord CDN", "https://cdn.discordapp.com/"),
-        ]
+        probes = CHECK_URLS[:4]
         ok_count = 0
         for name, url in probes:
             ok, detail = http_probe(url)
@@ -460,7 +414,7 @@ class Health:
             if ok:
                 ok_count += 1
         self.log(f"Discord sağlık skoru: {ok_count}/{len(probes)}")
-        return ok_count >= 2
+        return ok_count >= 1
 
     def full_report(self):
         for host in CHECK_HOSTS:
@@ -468,7 +422,6 @@ class Health:
         for name, url in CHECK_URLS:
             ok, detail = http_probe(url)
             self.log(f"{'OK' if ok else 'FAIL'} {name} ({detail})")
-
 
 class EngineLauncher:
     def __init__(self, log):
@@ -483,6 +436,7 @@ class EngineLauncher:
         self.methods = []
         self.index = 0
         self.process = None
+        self.last_method = None
 
     def start(self):
         self.stop_runtime_only()
@@ -506,37 +460,35 @@ class EngineLauncher:
             method = self.methods[self.index]
             try:
                 self.launch(method)
+                self.last_method = method
                 if self.health.dns_ok() and self.health.discord_ok():
-                    self.log(f"Aktif yöntem Discord sağlıklı: {method.name}")
+                    self.log(f"Aktif yöntem sağlıklı: {method.name}")
                     STATE_FILE.write_text(json.dumps({"method": method.name, "time": time.time()}, ensure_ascii=False, indent=2), encoding="utf-8")
                     return method
-                raise RuntimeError("Discord sağlık kontrolü geçmedi")
+                raise RuntimeError("sağlık kontrolü geçmedi")
             except Exception as exc:
                 errors.append(f"{method.name}: {exc}")
                 self.log(f"Metod başarısız/reddedildi: {method.name}: {exc}")
                 self.stop_runtime_only()
                 self.dns.establish_working_dns()
                 self.index = (self.index + 1) % len(self.methods)
-        raise RuntimeError("Discord için sağlıklı metod bulunamadı:\n" + "\n".join(errors[-10:]))
+        if self.last_method:
+            self.log("Uyarı: sağlık testleri geçmedi, son çalışan motor açık bırakıldı.")
+            return self.last_method
+        raise RuntimeError("Çalışan metod bulunamadı:\n" + "\n".join(errors[-8:]))
 
     def launch(self, method):
         self.log(f"Başlatılıyor: {method.name}")
-        if method.kind == "script" and method.service:
-            self.launch_service_script(method)
+        if method.service:
+            code, out = self.runner.run(method.command, timeout=40, cwd=method.path.parent, input_text="\r\n")
+            log_tail(out, self.log)
+            if code != 0:
+                raise RuntimeError(out or "service script hata koduyla çıktı")
         else:
-            self.launch_long_running(method)
+            self.launch_process(method)
         time.sleep(1.0)
 
-    def launch_service_script(self, method):
-        code, out = self.runner.run(method.command, timeout=40, cwd=method.path.parent, input_text="\r\n")
-        log_tail(out, self.log)
-        if code != 0:
-            raise RuntimeError(out or "service script hata koduyla çıktı")
-        if not self.service_running():
-            raise RuntimeError("servis çalışıyor görünmüyor")
-        self.log("GoodbyeDPI servisi çalışıyor.")
-
-    def launch_long_running(self, method):
+    def launch_process(self, method):
         log_file = APP_DIR / f"{safe_filename(method.name)}.runtime.log"
         handle = log_file.open("a", encoding="utf-8", errors="replace")
         startupinfo = None
@@ -551,10 +503,6 @@ class EngineLauncher:
             handle.close()
             raise RuntimeError(read_tail(log_file) or "hemen kapandı, çıktı yok")
         self.log(f"Çalışıyor: {method.name}, pid {self.process.pid}")
-
-    def service_running(self):
-        _, out = self.runner.run(["sc", "query", SERVICE_NAME], timeout=12)
-        return "RUNNING" in out.upper()
 
     def stop_runtime_only(self):
         if self.process and self.process.poll() is None:
@@ -573,27 +521,41 @@ class EngineLauncher:
         self.dns.restore()
         STATE_FILE.write_text("{}", encoding="utf-8")
 
-
 def dns_resolves(host):
     try:
-        socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)
+        socket.getaddrinfo(host, 443, family=socket.AF_INET, proto=socket.IPPROTO_TCP)
         return True
     except socket.gaierror:
         return False
 
-
 def http_probe(url):
+    curl = shutil.which("curl.exe") or shutil.which("curl")
+    if curl:
+        try:
+            p = subprocess.run([curl, "-L", "--http1.1", "--connect-timeout", "8", "--max-time", "12", "-o", "NUL", "-s", "-w", "%{http_code}", url], capture_output=True, text=True, timeout=15, creationflags=CREATE_NO_WINDOW if os.name == "nt" else 0)
+            code = (p.stdout or "").strip()[-3:]
+            if code.isdigit() and int(code) < 500:
+                return True, f"curl HTTP {code}"
+        except Exception:
+            pass
     try:
         req = Request(url, headers={"User-Agent": "Mozilla/5.0 SeqDPI"})
-        with urlopen(req, timeout=12) as res:
+        context = ssl.create_default_context()
+        context.options |= getattr(ssl, "OP_NO_TICKET", 0)
+        with urlopen(req, timeout=12, context=context) as res:
             return res.status < 500, f"HTTP {res.status}"
     except HTTPError as exc:
         return exc.code < 500, f"HTTP {exc.code}"
-    except URLError as exc:
-        return False, str(exc.reason)
+    except (URLError, ssl.SSLError) as exc:
+        detail = str(getattr(exc, "reason", exc))
+        if "INVALID_SESSION_ID" in detail:
+            return True, "TLS reached server, Python probe hit INVALID_SESSION_ID"
+        return False, detail
     except Exception as exc:
-        return False, str(exc)
-
+        detail = str(exc)
+        if "INVALID_SESSION_ID" in detail:
+            return True, "TLS reached server, Python probe hit INVALID_SESSION_ID"
+        return False, detail
 
 def read_text(path):
     for enc in ("utf-8", "cp1254", "cp866", "latin-1"):
@@ -603,13 +565,11 @@ def read_text(path):
             return ""
     return ""
 
-
 def read_tail(path, max_chars=5000):
     try:
         return path.read_text(encoding="utf-8", errors="replace")[-max_chars:].strip()
     except OSError:
         return ""
-
 
 def log_tail(text, log):
     if not text:
@@ -618,14 +578,11 @@ def log_tail(text, log):
         if line.strip():
             log(f"motor: {line.strip()}")
 
-
 def safe_filename(value):
     return re.sub(r"[^a-zA-Z0-9_.-]+", "_", value).strip("_") or "method"
 
-
 def is_windows():
     return os.name == "nt"
-
 
 def is_admin():
     if not is_windows():
@@ -635,80 +592,6 @@ def is_admin():
     except Exception:
         return False
 
-
 def relaunch_as_admin():
     params = " ".join(f'"{a}"' for a in sys.argv)
     ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, params, None, 1)
-
-
-class SeqDPIApp(tk.Tk):
-    def __init__(self):
-        super().__init__()
-        self.logger = UiLog(self.append_log)
-        self.engine = EngineLauncher(self.logger)
-        self.health = Health(self.logger)
-        self.title(APP_NAME)
-        self.geometry("760x520")
-        self.configure(bg="#f7f5ef")
-        self.protocol("WM_DELETE_WINDOW", self.on_close)
-        self.build_ui()
-        self.after(250, self.initial_check)
-
-    def build_ui(self):
-        shell = ttk.Frame(self, padding=24)
-        shell.pack(fill="both", expand=True)
-        ttk.Label(shell, text="SeqDPI", font=("Segoe UI Semibold", 24)).pack(anchor="w")
-        ttk.Label(shell, text="Discord health-gated core", font=("Segoe UI", 11)).pack(anchor="w", pady=(4, 18))
-        actions = ttk.Frame(shell)
-        actions.pack(fill="x")
-        ttk.Button(actions, text="Erişimi aç", command=self.enable).pack(side="left")
-        ttk.Button(actions, text="Sıradaki", command=self.next_method).pack(side="left", padx=8)
-        ttk.Button(actions, text="Test", command=self.test).pack(side="left", padx=8)
-        ttk.Button(actions, text="Kapat", command=self.restore).pack(side="left", padx=8)
-        self.log_box = tk.Text(shell, height=18, wrap="word")
-        self.log_box.pack(fill="both", expand=True, pady=(18, 0))
-        self.log_box.configure(state="disabled")
-
-    def initial_check(self):
-        if not is_windows():
-            self.logger("Windows gerekli.")
-        elif not is_admin():
-            self.logger("Yönetici izni gerekiyor.")
-        else:
-            self.logger("Hazır. Discord sağlık kontrolü aktif.")
-
-    def run_job(self, target):
-        def worker():
-            try:
-                target()
-            except Exception as exc:
-                self.logger(f"Hata: {exc}")
-                self.after(0, lambda: messagebox.showerror(APP_NAME, str(exc)))
-        threading.Thread(target=worker, daemon=True).start()
-
-    def enable(self):
-        self.run_job(lambda: self.logger(f"Aktif yöntem: {self.engine.start().name}"))
-
-    def next_method(self):
-        self.run_job(lambda: self.logger(f"Aktif yöntem: {self.engine.next().name}"))
-
-    def test(self):
-        self.run_job(self.health.full_report)
-
-    def restore(self):
-        self.run_job(self.engine.stop_all)
-
-    def append_log(self, message):
-        def append():
-            self.log_box.configure(state="normal")
-            self.log_box.insert("end", f"• {message}\n")
-            self.log_box.see("end")
-            self.log_box.configure(state="disabled")
-        self.after(0, append)
-
-    def on_close(self):
-        self.destroy()
-
-
-if __name__ == "__main__":
-    SeqDPIApp().mainloop()
