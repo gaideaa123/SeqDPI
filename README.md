@@ -10,16 +10,22 @@ SeqDPI-Setup.exe
 
 Kullanıcı bunu açar, Next der, masaüstüne **SeqDPI** gelir. Build klasörü, dist klasörü, Python, Inno Setup görmez.
 
-## Installer notu
+## Installer görünümü
 
-Setup başlamadan önce eski SeqDPI ve GoodbyeDPI süreçlerini kapatır, GoodbyeDPI servisini siler ve WinDivert kilitlerini best-effort durdurur. Böylece eski `SeqDPI.exe` veya motor açıkken yeniden kurulumda çıkan `Delete failed, code 5, Access denied` hatası engellenir.
+Setup artık klasik beyaz kurulum ekranı değil:
 
-## Sesler
+- Koyu neon SeqDPI teması
+- Üst bar görsel olarak sayfayla birleşik, bitmap gizli
+- Daha temiz welcome ve finish metinleri
+- Next akışı özellikle sade tutuldu
 
-- `hello.mp3`: program ilk açıldığında arka planda çalar
-- `dns.mp3`: sağlıklı yöntem bağlanınca arka planda çalar
+## Son hata düzeltmesi
 
-Bu iki dosya varsa PyInstaller otomatik exe içine paketler.
+Inno Setup aynı dosyada `ignoreversion` ve `replacesameversion` bayraklarını birlikte kabul etmiyor. `SeqDPI.exe` için artık sadece geçerli bayraklar kullanılıyor:
+
+```text
+replacesameversion restartreplace uninsrestartdelete
+```
 
 ## Setup üretmek
 
