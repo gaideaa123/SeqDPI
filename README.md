@@ -1,16 +1,16 @@
 # SeqDPI
 
-SeqDPI, Windows için tek butonlu bir erişim profili uygulaması. GUI üzerinden aktif ağ adaptörlerinin DNS ayarını Cloudflare DNS'e çeker, DNS önbelleğini temizler ve Roblox ile Discord bağlantılarını kontrol eder.
+SeqDPI, Windows için tek butonlu sistem geneli erişim profili uygulaması. DNS'i Cloudflare üstüne alır, Windows kullanıcı proxy'sini ve WinHTTP proxy ayarını yerel SeqDPI proxy'sine yönlendirir. Yerel proxy, TLS bağlantı başlangıcını küçük parçalara bölerek basit DPI kontrollerini atlatmayı dener.
 
 ## Özellikler
 
-- Tek butonla DNS profilini uygular
-- Yönetici izni yoksa kendini UAC ile yeniden açar
-- Aktif ağ adaptörlerini otomatik bulur
-- IPv4 ve IPv6 DNS sunucularını ayarlar
-- DNS önbelleğini temizler
-- Roblox ve Discord için hızlı bağlantı kontrolü yapar
-- İstersen tek tıkla eski otomatik DNS ayarına döner
+- Tek butonla sistem proxy modu
+- Cloudflare IPv4 ve IPv6 DNS profili
+- Yerel HTTP/HTTPS CONNECT proxy
+- TLS ClientHello parçalama
+- WinINet ve WinHTTP proxy ayarı
+- Roblox, Discord ve genel HTTPS siteleri için bağlantı kontrolü
+- Tek butonla DNS ve proxy ayarlarını geri alma
 
 ## Çalıştırma
 
@@ -20,11 +20,13 @@ Windows üzerinde Python 3.11 veya üstü yeterli.
 python seqdpi.py
 ```
 
-Uygulama sistem DNS ayarlarını değiştirdiği için yönetici izni ister.
+Uygulama sistem DNS, kullanıcı proxy ve WinHTTP proxy ayarlarını değiştirdiği için yönetici izni ister.
+
+## Önemli not
+
+Bu sürüm sistem proxy'sini kullanan uygulamalar için çalışır. Tarayıcılar, Discord ve birçok masaüstü uygulaması bunu dinler. Bazı oyun istemcileri ve kernel seviyesinde ağ kullanan programlar Windows proxy ayarını yok sayabilir. O sınıf için bir sonraki adım sürücü tabanlı WinDivert/WFP modu olur.
 
 ## Tek dosya exe üretme
-
-İstersen PyInstaller ile tek dosyalık exe alabilirsin:
 
 ```powershell
 pip install pyinstaller
@@ -32,7 +34,3 @@ pyinstaller --onefile --windowed --name SeqDPI seqdpi.py
 ```
 
 Çıktı `dist/SeqDPI.exe` altında oluşur.
-
-## Not
-
-Bu sürüm DNS tabanlı erişim sorunlarını hedefler. Operatör tarafında DNS dışı filtreleme varsa bağlantı testi uyarı verebilir. Bu durumda bir sonraki adım Windows paket katmanı entegrasyonu olur.
