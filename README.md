@@ -2,30 +2,21 @@
 
 SeqDPI, Türkiye için tek tık Windows DPI yardımcı uygulaması.
 
+## Son düzeltmeler
+
+- Kurulum sonunda uygulamayı açarken çıkan `CreateProcess failed, code 740` düzeltildi
+- Setup artık postinstall launch için `runascurrentuser` kullanır
+- Uygulama GUI'si frameless, özel sürüklenebilir üst barlı ve daha minimal neon tasarımlı
+- Native Windows title bar yerine yarı saydam görünen özel kontrol barı var
+- Installer ekranı koyu neon tema ve özel welcome metinleriyle cilalandı
+
 ## Kullanıcıya verilecek dosya
 
 ```text
 SeqDPI-Setup.exe
 ```
 
-Kullanıcı bunu açar, Next der, masaüstüne **SeqDPI** gelir. Build klasörü, dist klasörü, Python, Inno Setup görmez.
-
-## Installer görünümü
-
-Setup artık klasik beyaz kurulum ekranı değil:
-
-- Koyu neon SeqDPI teması
-- Üst bar görsel olarak sayfayla birleşik, bitmap gizli
-- Daha temiz welcome ve finish metinleri
-- Next akışı özellikle sade tutuldu
-
-## Son hata düzeltmesi
-
-Inno Setup aynı dosyada `ignoreversion` ve `replacesameversion` bayraklarını birlikte kabul etmiyor. `SeqDPI.exe` için artık sadece geçerli bayraklar kullanılıyor:
-
-```text
-replacesameversion restartreplace uninsrestartdelete
-```
+Kullanıcı bunu açar, Next der, masaüstüne **SeqDPI** gelir.
 
 ## Setup üretmek
 
