@@ -1,19 +1,15 @@
 # SeqDPI
 
-## Discord fix
+## Discord invalid session fix
 
-Bu sürüm Roblox çalışırken Discord'un web ve uygulama tarafında kalmasını düzeltmek için başarı kriterini değiştirdi.
+Bu sürüm Discord tarafında görülen `[SSL: INVALID_SESSION_ID]` probe hatasını düzeltir.
 
-Önceden metod sadece DNS sağlamsa başarılı sayılıyordu. Artık Discord özel sağlık kontrolü var:
+Ne değişti:
 
-- `discord.com`
-- `gateway.discord.gg`
-- `updates.discord.com`
-- `cdn.discordapp.com`
-- `discordapp.com / discordapp.net / discord.gg`
+- Discord için agresif `-7/-8/-9` yerine önce daha uyumlu `-2`, `-1`, `-4` denenir
+- Health check önce Windows `curl.exe` ile yapılır, Python OpenSSL'in false negative hatasına takılmaz
+- Python fallback içinde TLS session ticket kapatılır
+- `INVALID_SESSION_ID` artık doğrudan metod başarısızlığı sayılmaz, TLS'in hedefe ulaştığı sinyal olarak loglanır
+- Discord web, gateway, update ve CDN kontrolleri yine korunur
 
-Ayrıca Discord hedefli blacklist dosyası oluşturulup önce `discord targeted -9/-8/-7...` modları deneniyor. Bir metod Discord web, gateway, update ve CDN testlerinden geçmezse kapatılıp sıradaki metoda geçiliyor.
-
-## Kullanıcı akışı
-
-Kullanıcı yine sadece `SeqDPI-Setup.exe` alır, kurar, masaüstündeki SeqDPI'yi açar ve tek tuşa basar.
+Kısaca: Roblox çalışırken Discord'u öldüren agresif fragmentation daha geç denenir, Discord için daha uyumlu modlar öne alınır.

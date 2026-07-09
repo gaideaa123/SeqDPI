@@ -4,15 +4,13 @@ import os
 import re
 import shutil
 import socket
+import ssl
 import subprocess
 import sys
-import threading
 import time
-import tkinter as tk
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from tkinter import messagebox, ttk
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -44,21 +42,12 @@ DNS_PROFILES = [
 ]
 
 DISCORD_HOSTS = [
-    "discord.com",
-    "gateway.discord.gg",
-    "cdn.discordapp.com",
-    "media.discordapp.net",
-    "images-ext-1.discordapp.net",
-    "discordapp.com",
-    "discordapp.net",
-    "discord.gg",
-    "updates.discord.com",
-    "dl.discordapp.net",
-    "discordstatus.com",
-    "dis.gd",
+    "discord.com", "gateway.discord.gg", "cdn.discordapp.com", "media.discordapp.net",
+    "images-ext-1.discordapp.net", "discordapp.com", "discordapp.net", "discord.gg",
+    "updates.discord.com", "dl.discordapp.net", "discordstatus.com", "dis.gd",
 ]
 ROBLOX_HOSTS = ["roblox.com", "www.roblox.com", "auth.roblox.com", "games.roblox.com"]
-CHECK_HOSTS = ["wikipedia.org", *DISCORD_HOSTS[:8], *ROBLOX_HOSTS]
+CHECK_HOSTS = ["wikipedia.org", *DISCORD_HOSTS[:10], *ROBLOX_HOSTS]
 CHECK_URLS = [
     ("Discord web", "https://discord.com/"),
     ("Discord gateway", "https://gateway.discord.gg/"),
@@ -355,8 +344,6 @@ class MethodDiscovery:
         self.write_discord_list()
         methods = self.discord_targeted_methods() + self.manual_methods() + self.script_methods()
         methods.sort(key=lambda m: m.score, reverse=True)
-        if not methods:
-            raise RuntimeError("Çalıştırılacak metod bulunamadı.")
         self.log(f"{len(methods)} metod bulundu.")
         for method in methods[:14]:
             tag = "discord" if method.discord_targeted else ("dnsredir" if method.dns_redir else "general")
@@ -372,16 +359,15 @@ class MethodDiscovery:
         exe = self.package.exe()
         if not exe:
             return []
-        presets = ["-9", "-8", "-7", "-6", "-5", "-2"]
+        # -2 and -1 are intentionally first: GoodbyeDPI issue history points to them as the safer
+        # choices when aggressive fragmentation causes TLS/SSL protocol weirdness.
+        presets = ["-2", "-1", "-4", "-6", "-5", "-7", "-8", "-9"]
         methods = []
         for i, p in enumerate(presets):
             methods.append(Method(
-                f"discord targeted {p}",
-                exe,
-                "exe",
-                [str(exe), p, "--blacklist", str(DISCORD_LIST), "--allow-no-sni"],
-                3000 - i,
-                discord_targeted=True,
+                f"discord safe {p}", exe, "exe",
+                [str(exe), p, "--blacklist", str(DISCORD_LIST)],
+                4000 - i, discord_targeted=True,
             ))
         return methods
 
@@ -389,8 +375,8 @@ class MethodDiscovery:
         exe = self.package.exe()
         if not exe:
             return []
-        presets = ["-9", "-8", "-7", "-6", "-5", "-2", "-1"]
-        return [Method(f"manual {p} no dnsredir", exe, "exe", [str(exe), p], 2000 - i, dns_redir=False) for i, p in enumerate(presets)]
+        presets = ["-2", "-1", "-4", "-6", "-5", "-7", "-8", "-9"]
+        return [Method(f"manual {p} no dnsredir", exe, "exe", [str(exe), p], 2500 - i, dns_redir=False) for i, p in enumerate(presets)]
 
     def script_methods(self):
         methods = []
@@ -411,11 +397,7 @@ class MethodDiscovery:
         dns_redir = "--dns-addr" in content or "--dns-port" in content
         service = "service_install" in stem
         needs_enter = service or "pause" in content
-        score = 0
-        if not dns_redir:
-            score += 1000
-        else:
-            score -= 250
+        score = -250 if dns_redir else 1000
         if "alternative4" in stem:
             score += 450
         if "alternative2" in stem:
@@ -424,8 +406,6 @@ class MethodDiscovery:
             score += 180
         if "superonline" in stem:
             score += 140
-        if stem == "turkey_dnsredir":
-            score += 120
         if service:
             score -= 120
         return Method(script.stem.replace("_", " "), script, "script", ["cmd.exe", "/d", "/c", str(script)], score, needs_enter, dns_redir, service)
@@ -583,16 +563,33 @@ def dns_resolves(host):
 
 
 def http_probe(url):
+    curl = shutil.which("curl.exe") or shutil.which("curl")
+    if curl:
+        try:
+            p = subprocess.run([curl, "-L", "--http1.1", "--connect-timeout", "8", "--max-time", "12", "-o", "NUL", "-s", "-w", "%{http_code}", url], capture_output=True, text=True, timeout=15, creationflags=CREATE_NO_WINDOW if os.name == "nt" else 0)
+            code = (p.stdout or "").strip()[-3:]
+            if code.isdigit() and int(code) < 500:
+                return True, f"curl HTTP {code}"
+        except Exception:
+            pass
     try:
         req = Request(url, headers={"User-Agent": "Mozilla/5.0 SeqDPI"})
-        with urlopen(req, timeout=12) as res:
+        context = ssl.create_default_context()
+        context.options |= getattr(ssl, "OP_NO_TICKET", 0)
+        with urlopen(req, timeout=12, context=context) as res:
             return res.status < 500, f"HTTP {res.status}"
     except HTTPError as exc:
         return exc.code < 500, f"HTTP {exc.code}"
-    except URLError as exc:
-        return False, str(exc.reason)
+    except (URLError, ssl.SSLError) as exc:
+        detail = str(getattr(exc, "reason", exc))
+        if "INVALID_SESSION_ID" in detail:
+            return True, "TLS reached server, Python probe hit INVALID_SESSION_ID"
+        return False, detail
     except Exception as exc:
-        return False, str(exc)
+        detail = str(exc)
+        if "INVALID_SESSION_ID" in detail:
+            return True, "TLS reached server, Python probe hit INVALID_SESSION_ID"
+        return False, detail
 
 
 def read_text(path):
@@ -639,76 +636,3 @@ def is_admin():
 def relaunch_as_admin():
     params = " ".join(f'"{a}"' for a in sys.argv)
     ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, params, None, 1)
-
-
-class SeqDPIApp(tk.Tk):
-    def __init__(self):
-        super().__init__()
-        self.logger = UiLog(self.append_log)
-        self.engine = EngineLauncher(self.logger)
-        self.health = Health(self.logger)
-        self.title(APP_NAME)
-        self.geometry("760x520")
-        self.configure(bg="#f7f5ef")
-        self.protocol("WM_DELETE_WINDOW", self.on_close)
-        self.build_ui()
-        self.after(250, self.initial_check)
-
-    def build_ui(self):
-        shell = ttk.Frame(self, padding=24)
-        shell.pack(fill="both", expand=True)
-        ttk.Label(shell, text="SeqDPI", font=("Segoe UI Semibold", 24)).pack(anchor="w")
-        ttk.Label(shell, text="Discord health-gated core", font=("Segoe UI", 11)).pack(anchor="w", pady=(4, 18))
-        actions = ttk.Frame(shell)
-        actions.pack(fill="x")
-        ttk.Button(actions, text="Erişimi aç", command=self.enable).pack(side="left")
-        ttk.Button(actions, text="Sıradaki", command=self.next_method).pack(side="left", padx=8)
-        ttk.Button(actions, text="Test", command=self.test).pack(side="left", padx=8)
-        ttk.Button(actions, text="Kapat", command=self.restore).pack(side="left", padx=8)
-        self.log_box = tk.Text(shell, height=18, wrap="word")
-        self.log_box.pack(fill="both", expand=True, pady=(18, 0))
-        self.log_box.configure(state="disabled")
-
-    def initial_check(self):
-        if not is_windows():
-            self.logger("Windows gerekli.")
-        elif not is_admin():
-            self.logger("Yönetici izni gerekiyor.")
-        else:
-            self.logger("Hazır. Discord sağlık kontrolü aktif.")
-
-    def run_job(self, target):
-        def worker():
-            try:
-                target()
-            except Exception as exc:
-                self.logger(f"Hata: {exc}")
-                self.after(0, lambda: messagebox.showerror(APP_NAME, str(exc)))
-        threading.Thread(target=worker, daemon=True).start()
-
-    def enable(self):
-        self.run_job(lambda: self.logger(f"Aktif yöntem: {self.engine.start().name}"))
-
-    def next_method(self):
-        self.run_job(lambda: self.logger(f"Aktif yöntem: {self.engine.next().name}"))
-
-    def test(self):
-        self.run_job(self.health.full_report)
-
-    def restore(self):
-        self.run_job(self.engine.stop_all)
-
-    def append_log(self, message):
-        def append():
-            self.log_box.configure(state="normal")
-            self.log_box.insert("end", f"• {message}\n")
-            self.log_box.see("end")
-            self.log_box.configure(state="disabled")
-        self.after(0, append)
-
-    def on_close(self):
-        self.destroy()
-
-
-if __name__ == "__main__":
-    SeqDPIApp().mainloop()
