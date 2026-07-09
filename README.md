@@ -1,14 +1,20 @@
 # SeqDPI
 
-## Tray davranışı
+## Tray + tkinter fix
 
-Son sürümde pencere artık arkada rahatsız etmez:
+Tray launcher artık `tkinter`, `_tkinter`, `tkinter.ttk`, `seqdpi`, `pystray` ve `Pillow` bağımlılıklarını açıkça import eder. Çünkü `SeqDPI.pyw` dinamik olarak `runpy` ile yüklendiğinde PyInstaller tkinter bağımlılığını göremiyordu.
+
+Bu düzeltme şu hatayı hedefler:
+
+```text
+ModuleNotFoundError: No module named 'tkinter'
+```
+
+## Davranış
 
 - X tuşu uygulamayı kapatmaz, tray'e gizler
 - Küçült tuşu tray'e gizler
-- Tray menüsünden tekrar açılabilir
-- Tray menüsünden sadece motor kapatılabilir
-- Tray menüsünden tamamen çıkış yapılabilir
+- Tray menüsünden Aç, Gizle, Motoru kapat, Çıkış yapılır
 
 ## Build
 
@@ -16,9 +22,7 @@ Son sürümde pencere artık arkada rahatsız etmez:
 ./build_installer.ps1
 ```
 
-Build artık `pystray` ve `pillow` paketlerini kurar, `SeqDPI_tray.pyw` launcher'ını paketler.
-
-Kullanıcıya yine sadece şunu ver:
+Kullanıcıya yine sadece:
 
 ```text
 SeqDPI-Setup.exe
