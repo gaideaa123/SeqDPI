@@ -1,36 +1,30 @@
 # SeqDPI
 
-SeqDPI, Türkiye koşullarına göre ayarlanmış tek butonlu Windows DPI atlatma GUI'si.
+SeqDPI, Türkiye için tek butonlu GoodbyeDPI launcher GUI'si.
 
-Araştırma sonucu düzeltme: sadece DNS değiştirmek veya sadece upstream GoodbyeDPI `-9` çalıştırmak yetmiyor. Türkiye'de bazı ISS'ler DNS'i zehirliyor veya kesiyor, Chrome/Edge QUIC/HTTP3 ile TCP tarafındaki DPI atlatmayı boşa çıkarabiliyor, Chromium Kyber ise TLS ClientHello paketini büyütüp bazı GoodbyeDPI modlarını kırabiliyor.
+Bu sürümde önceki hatanın kökü düzeltildi: uygulama artık kafadan argüman üretmiyor. `GoodbyeDPI-Turkey` release paketini indiriyor, içindeki gerçek `.cmd` / `.bat` metodlarını keşfediyor, önce en olası Türkiye DNS redirection servis scriptini çalıştırıyor, olmazsa sıradaki yöntemlere geçiyor. Motor kapanırsa artık sessizce “kapandı” demiyor, gerçek stdout/stderr çıktısını loga basıyor.
 
-## Yeni çalışma şekli
+## Ne değişti?
 
-- Resmi `cagritaskn/GoodbyeDPI-Turkey` release paketini indirir
-- WinDivert tabanlı `goodbyedpi.exe` motorunu çalıştırır
-- Varsayılan olarak Türkiye DNS redirection modu kullanır
-- DNS isteklerini non-standard porttaki resolvere yönlendirir
-- UDP 443 çıkışını firewall ile kapatıp QUIC/HTTP3'ü devre dışı bırakır
-- Chrome ve Edge için Kyber/PostQuantumKeyAgreement policy değerini kapatır
-- HTTP testlerinde 403/404 gibi siteye ulaşıldığını gösteren cevapları artık yanlışlıkla FAIL saymaz
-- Tek butonla motoru durdurur, DNS'i otomatiğe alır, firewall kuralını kaldırır
+- Release içindeki scriptler otomatik keşfedilir
+- `service_install`, `dnsredir`, `turkey`, `alternative`, `superonline` isimlerine göre yöntem sıralanır
+- Desteklenmeyen argüman basma hatası kaldırıldı
+- `goodbyedpi.exe -h` çıktısı okunup sadece desteklenen manuel fallbackler oluşturulur
+- Motor hemen kapanırsa hata çıktısı kullanıcıya gösterilir
+- QUIC/HTTP3 UDP 443 firewall kuralı eklenir
+- Chrome/Edge Secure DNS policy kapatılır
+- Chrome/Edge Kyber policy kapatılır
+- DNS Cloudflare'a alınır, DNS önbelleği temizlenir
+- Kapatırken service remove scriptleri aranır, kalan `goodbyedpi.exe` süreçleri kapatılır, DNS geri alınır
+- Log `%APPDATA%/SeqDPI/seqdpi.log` altında tutulur
 
-## Modlar
-
-1. Türkiye DNS redir: `-9` + DNS redirection
-2. SNI parçalama: manual modern mode + `--frag-by-sni`
-3. Uyumlu mod: `-7` + DNS redirection
-4. Eski uyumlu mod: `-2` + DNS redirection
-
-## Çalıştırma
-
-Windows üzerinde Python 3.11 veya üstü:
+## Kullanım
 
 ```powershell
 python seqdpi.py
 ```
 
-Yönetici izni gerekir. İlk çalıştırmada motor `%APPDATA%/SeqDPI/engine` altına indirilir.
+Yönetici izni gerekir.
 
 ## Exe üretme
 
@@ -38,3 +32,7 @@ Yönetici izni gerekir. İlk çalıştırmada motor `%APPDATA%/SeqDPI/engine` al
 pip install pyinstaller
 pyinstaller --onefile --windowed --name SeqDPI seqdpi.py
 ```
+
+## Not
+
+Türkiye'deki ISS davranışı sabit değil. Bu yüzden tek bir hardcoded preset yerine gerçek paket metodlarını sırayla deneyen launcher daha sağlamdır.
