@@ -1,25 +1,25 @@
 # SeqDPI
 
-## En güncel arkadaş build'i
+## Tray davranışı
 
-Bu branch arkadaşın bilgisayarı için en güvenli mantığı hedefler:
+Son sürümde pencere artık arkada rahatsız etmez:
 
-- DNS'e public resolver dayatmaz
-- DNS başarısızsa bile motoru denemeye devam eder
-- Ping artmasın diye önce sadece hedef domainlere uygulanan modlar kullanılmalı
-- Roblox ve Discord dışı oyun trafiğine dokunulmamalı
-- Global DPI modları sadece son çare olmalı
+- X tuşu uygulamayı kapatmaz, tray'e gizler
+- Küçült tuşu tray'e gizler
+- Tray menüsünden tekrar açılabilir
+- Tray menüsünden sadece motor kapatılabilir
+- Tray menüsünden tamamen çıkış yapılabilir
 
-## Ping sorunu neden olur?
+## Build
 
-GoodbyeDPI/WinDivert tüm trafiğe uygulanırsa bazı oyunlarda lag spike veya ping artışı olabilir. Çözüm, sistemi komple kurcalamak değil, sadece engelli hedeflerin ilk bağlantı paketlerini hedeflemektir.
+```powershell
+./build_installer.ps1
+```
 
-## Arkadaşa verilecek dosya
+Build artık `pystray` ve `pillow` paketlerini kurar, `SeqDPI_tray.pyw` launcher'ını paketler.
 
-Sadece:
+Kullanıcıya yine sadece şunu ver:
 
 ```text
 SeqDPI-Setup.exe
 ```
-
-Eski sürüm yüklüyse önce kaldırıp yeni setup ile kurması daha temiz olur.

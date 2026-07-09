@@ -3,18 +3,18 @@ import os
 
 block_cipher = None
 
-datas = []
+datas = [('SeqDPI.pyw', '.')]
 if os.path.exists('hello.mp3'):
     datas.append(('hello.mp3', '.'))
 if os.path.exists('dns.mp3'):
     datas.append(('dns.mp3', '.'))
 
 a = Analysis(
-    ['SeqDPI.pyw'],
+    ['SeqDPI_tray.pyw'],
     pathex=[],
     binaries=[],
     datas=datas,
-    hiddenimports=[],
+    hiddenimports=['pystray', 'PIL', 'PIL.Image', 'PIL.ImageDraw'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
