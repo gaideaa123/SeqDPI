@@ -19,6 +19,8 @@ Bu dosya GitHub Actions artifact olarak `SeqDPI-Setup` adıyla üretilir.
 - `Program Files\SeqDPI` altına kurar
 - Masaüstüne `SeqDPI` kısayolu ekler
 - Başlat menüsüne `SeqDPI` ekler
+- GoodbyeDPI-Turkey motorunu setup içine paketler
+- İlk açılışta ayrıca motor indirmeye gerek kalmaz
 - İsterse kurulum bitince uygulamayı açar
 - Kullanıcı build/dist klasörü görmez
 

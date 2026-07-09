@@ -11,10 +11,8 @@ AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
-LicenseFile=
 OutputDir=..\dist\installer
 OutputBaseFilename=SeqDPI-Setup
-SetupIconFile=
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -36,6 +34,7 @@ Name: "launchafter"; Description: "Kurulum bitince SeqDPI'yi aç"; GroupDescript
 
 [Files]
 Source: "..\dist\SeqDPI.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\engine\*"; DestDir: "{userappdata}\SeqDPI\engine-turkey-current"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
