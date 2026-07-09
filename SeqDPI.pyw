@@ -1,5 +1,7 @@
+import ctypes
 import math
-import random
+import os
+import sys
 import threading
 import time
 import tkinter as tk
@@ -28,6 +30,43 @@ VIOLET = "#8f6bff"
 RED = "#ff5d73"
 PANEL = "#211936"
 PANEL_2 = "#2c2145"
+
+
+def resource_path(name):
+    roots = []
+    if hasattr(sys, "_MEIPASS"):
+        roots.append(sys._MEIPASS)
+    roots.extend([os.path.dirname(os.path.abspath(__file__)), os.getcwd()])
+    for root in roots:
+        path = os.path.join(root, name)
+        if os.path.exists(path):
+            return path
+    return None
+
+
+class SoundPlayer:
+    def __init__(self):
+        self.counter = 0
+
+    def play(self, filename):
+        path = resource_path(filename)
+        if not path or os.name != "nt":
+            return
+        self.counter += 1
+        alias = f"seqdpi_sound_{self.counter}"
+        safe = path.replace('"', '')
+
+        def worker():
+            try:
+                winmm = ctypes.windll.winmm
+                winmm.mciSendStringW(f'open "{safe}" type mpegvideo alias {alias}', None, 0, None)
+                winmm.mciSendStringW(f'play {alias}', None, 0, None)
+                time.sleep(8)
+                winmm.mciSendStringW(f'close {alias}', None, 0, None)
+            except Exception:
+                pass
+
+        threading.Thread(target=worker, daemon=True).start()
 
 
 class NeonCanvas(tk.Canvas):
@@ -69,9 +108,8 @@ class NeonCanvas(tk.Canvas):
         self.tag_lower("bg")
 
     def draw_glow(self, x, y, r, color):
-        layers = 12
-        for i in range(layers, 0, -1):
-            ratio = i / layers
+        for i in range(12, 0, -1):
+            ratio = i / 12
             rr = r * ratio
             shade = blend(color, BG, 0.68 + ratio * 0.28)
             self.create_oval(x - rr, y - rr, x + rr, y + rr, fill=shade, outline="", tags="bg")
@@ -139,6 +177,7 @@ class SeqDPINeonApp(tk.Tk):
         self.minsize(860, 620)
         self.configure(bg=BG)
         self.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.sound = SoundPlayer()
         self.logger = UiLog(self.append_log)
         self.engine = EngineLauncher(self.logger)
         self.health = Health(self.logger)
@@ -147,40 +186,33 @@ class SeqDPINeonApp(tk.Tk):
         self.busy = False
         self.ring_angle = 0
         self.build()
+        self.after(300, lambda: self.sound.play("hello.mp3"))
         self.after(180, self.initial_check)
         self.after(40, self.animate_status)
 
     def build(self):
         self.bg = NeonCanvas(self)
         self.bg.place(x=0, y=0, relwidth=1, relheight=1)
-
         self.main = tk.Frame(self.bg, bg=BG)
         self.main.place(relx=0.5, rely=0.5, anchor="center", relwidth=0.92, relheight=0.88)
-
         top = tk.Frame(self.main, bg=BG)
         top.pack(fill="x")
-
         brand = tk.Frame(top, bg=BG)
         brand.pack(side="left", anchor="n")
         tk.Label(brand, text="SeqDPI", bg=BG, fg=INK, font=("Segoe UI Black", 34)).pack(anchor="w")
         tk.Label(brand, text="renkli, sessiz, tek tuş", bg=BG, fg=MUTED, font=("Segoe UI", 12)).pack(anchor="w", pady=(2, 0))
-
         self.status_canvas = tk.Canvas(top, width=190, height=86, bg=BG, highlightthickness=0)
         self.status_canvas.pack(side="right", anchor="ne")
-
         hero = tk.Frame(self.main, bg=BG)
         hero.pack(fill="x", pady=(34, 0))
-
         self.power = tk.Canvas(hero, width=260, height=260, bg=BG, highlightthickness=0)
         self.power.pack(side="left", padx=(0, 34))
         self.power.bind("<Button-1>", lambda _event: self.enable() if not self.busy else None)
         self.power.bind("<Enter>", lambda _event: self.power.configure(cursor="hand2"))
-
         copy = tk.Frame(hero, bg=BG)
         copy.pack(side="left", fill="both", expand=True)
         tk.Label(copy, text="Engeli aç, gerisini sakince bana bırak.", bg=BG, fg=INK, font=("Segoe UI Semibold", 26), wraplength=560, justify="left").pack(anchor="w")
         tk.Label(copy, text="DNS sağlığı kontrol edilir, çalışan metod korunur, CMD penceresi gösterilmez. Olmazsa sıradaki yöntem tek tık uzakta.", bg=BG, fg=MUTED, font=("Segoe UI", 13), wraplength=600, justify="left").pack(anchor="w", pady=(12, 0))
-
         actions = tk.Frame(copy, bg=BG)
         actions.pack(anchor="w", pady=(28, 0))
         self.btn_enable = NeonButton(actions, "Erişimi aç", self.enable, PINK, 164)
@@ -191,15 +223,12 @@ class SeqDPINeonApp(tk.Tk):
         self.btn_test.pack(side="left", padx=(0, 12))
         self.btn_restore = NeonButton(actions, "Kapat", self.restore, ORANGE, 118)
         self.btn_restore.pack(side="left")
-
         links = tk.Frame(copy, bg=BG)
         links.pack(anchor="w", pady=(18, 0))
         self.link_button(links, "Roblox", lambda: self.open_link("Roblox"), PINK).pack(side="left", padx=(0, 10))
         self.link_button(links, "Discord", lambda: self.open_link("Discord"), CYAN).pack(side="left")
-
         lower = tk.Frame(self.main, bg=BG)
         lower.pack(fill="both", expand=True, pady=(30, 0))
-
         self.log_frame = tk.Frame(lower, bg=PANEL, highlightthickness=1, highlightbackground="#4c3b74")
         self.log_frame.pack(side="left", fill="both", expand=True)
         tk.Label(self.log_frame, text="Canlı günlük", bg=PANEL, fg=INK, font=("Segoe UI Semibold", 13)).pack(anchor="w", padx=18, pady=(14, 8))
@@ -209,7 +238,6 @@ class SeqDPINeonApp(tk.Tk):
         self.log_box.tag_config("ok", foreground=LIME)
         self.log_box.tag_config("fail", foreground=RED)
         self.log_box.tag_config("info", foreground=CYAN)
-
         side = tk.Frame(lower, bg=BG, width=250)
         side.pack(side="right", fill="y", padx=(20, 0))
         self.metric(side, "DNS", "health gated", CYAN)
@@ -217,8 +245,7 @@ class SeqDPINeonApp(tk.Tk):
         self.metric(side, "Paket", "SeqDPI.exe", LIME)
 
     def link_button(self, master, text, command, color):
-        b = tk.Button(master, text=text, command=command, bg=PANEL_2, fg=color, activebackground="#362855", activeforeground=INK, relief="flat", padx=16, pady=8, font=("Segoe UI Semibold", 10), cursor="hand2")
-        return b
+        return tk.Button(master, text=text, command=command, bg=PANEL_2, fg=color, activebackground="#362855", activeforeground=INK, relief="flat", padx=16, pady=8, font=("Segoe UI Semibold", 10), cursor="hand2")
 
     def metric(self, master, title, value, color):
         frame = tk.Frame(master, bg=PANEL, highlightthickness=1, highlightbackground="#4c3b74")
@@ -240,7 +267,7 @@ class SeqDPINeonApp(tk.Tk):
             self.btn_enable.draw()
             return
         self.set_status("hazır", LIME)
-        self.logger("Hazır. Çalışan çekirdek korunuyor, arayüz neon moda geçti.")
+        self.logger("Hazır. Sesler paketlendi, neon GUI aktif.")
 
     def elevate(self):
         try:
@@ -256,6 +283,7 @@ class SeqDPINeonApp(tk.Tk):
         method = self.engine.start()
         self.logger(f"Aktif yöntem: {method.name}")
         self.health.full_report()
+        self.sound.play("dns.mp3")
         self.set_status("aktif", LIME)
 
     def next_method(self):
@@ -265,6 +293,7 @@ class SeqDPINeonApp(tk.Tk):
         method = self.engine.next()
         self.logger(f"Aktif yöntem: {method.name}")
         self.health.full_report()
+        self.sound.play("dns.mp3")
         self.set_status("alternatif aktif", LIME)
 
     def test(self):

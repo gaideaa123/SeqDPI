@@ -1,12 +1,19 @@
 # -*- mode: python ; coding: utf-8 -*-
+import os
 
 block_cipher = None
+
+datas = []
+if os.path.exists('hello.mp3'):
+    datas.append(('hello.mp3', '.'))
+if os.path.exists('dns.mp3'):
+    datas.append(('dns.mp3', '.'))
 
 a = Analysis(
     ['SeqDPI.pyw'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=datas,
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
