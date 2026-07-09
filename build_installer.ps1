@@ -3,6 +3,50 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $Root
 
+function Find-InnoSetup {
+  $candidates = @(
+    "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+    "${env:ProgramFiles}\Inno Setup 6\ISCC.exe",
+    "${env:LOCALAPPDATA}\Programs\Inno Setup 6\ISCC.exe"
+  )
+
+  $found = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+  if ($found) { return $found }
+
+  $cmd = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+  if ($cmd) { return $cmd.Source }
+
+  return $null
+}
+
+function Install-InnoSetup {
+  Write-Host "[SeqDPI] Inno Setup bulunamadı, otomatik kurulacak..."
+
+  $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
+  if ($winget) {
+    Write-Host "[SeqDPI] winget ile Inno Setup kuruluyor..."
+    & winget install --id JRSoftware.InnoSetup --exact --silent --accept-package-agreements --accept-source-agreements
+    if ($LASTEXITCODE -ne 0) {
+      Write-Host "[SeqDPI] winget id ile bulamadı, arama adıyla deneniyor..."
+      & winget install "Inno Setup" --silent --accept-package-agreements --accept-source-agreements
+    }
+  }
+
+  $iscc = Find-InnoSetup
+  if ($iscc) { return $iscc }
+
+  $choco = Get-Command choco.exe -ErrorAction SilentlyContinue
+  if ($choco) {
+    Write-Host "[SeqDPI] Chocolatey ile Inno Setup kuruluyor..."
+    & choco install innosetup -y
+  }
+
+  $iscc = Find-InnoSetup
+  if ($iscc) { return $iscc }
+
+  throw "Inno Setup otomatik kurulamadı. Elle şu tek komutu çalıştır: winget install --id JRSoftware.InnoSetup --exact"
+}
+
 Write-Host "[SeqDPI] Building app executable first..."
 ./build_exe.ps1
 
@@ -25,16 +69,10 @@ Expand-Archive -Path $EngineZip -DestinationPath $EngineDir -Force
 $HasRuntime = Get-ChildItem -Path $EngineDir -Recurse -Filter "turkey_dnsredir.cmd" | Select-Object -First 1
 if (-not $HasRuntime) { throw "Bundled engine içinde turkey_dnsredir.cmd yok" }
 
-$IsccCandidates = @(
-  "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
-  "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
-)
+$Iscc = Find-InnoSetup
+if (-not $Iscc) { $Iscc = Install-InnoSetup }
 
-$Iscc = $IsccCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-if (-not $Iscc) {
-  throw "Inno Setup 6 bulunamadı. Kur: winget install JRSoftware.InnoSetup veya choco install innosetup"
-}
-
+Write-Host "[SeqDPI] Inno Setup: $Iscc"
 Write-Host "[SeqDPI] Building setup wizard..."
 & $Iscc "installer\SeqDPI.iss"
 
