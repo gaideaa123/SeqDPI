@@ -1,8 +1,17 @@
+import ctypes
+import math
 import os
 import runpy
 import sys
 import threading
 import time
+import tkinter as tk
+from tkinter import messagebox, ttk
+import webbrowser
+
+# These imports are intentionally explicit. SeqDPI.pyw is loaded dynamically with runpy, so
+# PyInstaller cannot see its dependency graph unless the tray launcher imports the same basics.
+import seqdpi  # noqa: F401
 
 
 def resource_path(name):
@@ -62,7 +71,7 @@ class TraySeqDPIApp(BaseSeqDPIApp):
         )
         threading.Thread(target=self.tray_icon.run, daemon=True).start()
         self.tray_ready = True
-        self.logger("Tray aktif. X veya küçültme pencereyi gizler, uygulama görev çubuğundan geri açılır.")
+        self.logger("Tray aktif. X veya küçültme pencereyi gizler, tray'den geri açılır.")
 
     def _restore_frameless(self, _event=None):
         try:

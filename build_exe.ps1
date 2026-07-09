@@ -14,7 +14,7 @@ $AddDataArgs = @("--add-data", "SeqDPI.pyw;.")
 if (Test-Path "hello.mp3") { $AddDataArgs += @("--add-data", "hello.mp3;.") }
 if (Test-Path "dns.mp3") { $AddDataArgs += @("--add-data", "dns.mp3;.") }
 
-Write-Host "[SeqDPI] Building colorful windowed admin exe with tray support..."
+Write-Host "[SeqDPI] Building windowed admin exe with tray support..."
 pyinstaller `
   --noconfirm `
   --clean `
@@ -23,6 +23,13 @@ pyinstaller `
   --name SeqDPI `
   --uac-admin `
   --version-file version_info.txt `
+  --hidden-import tkinter `
+  --hidden-import _tkinter `
+  --hidden-import tkinter.ttk `
+  --hidden-import pystray `
+  --hidden-import PIL `
+  --hidden-import PIL.Image `
+  --hidden-import PIL.ImageDraw `
   @AddDataArgs `
   SeqDPI_tray.pyw
 
