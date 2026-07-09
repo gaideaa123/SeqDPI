@@ -10,6 +10,10 @@ SeqDPI-Setup.exe
 
 Kullanıcı bunu açar, Next der, masaüstüne **SeqDPI** gelir. Build klasörü, dist klasörü, Python, Inno Setup görmez.
 
+## Installer notu
+
+Setup başlamadan önce eski SeqDPI ve GoodbyeDPI süreçlerini kapatır, GoodbyeDPI servisini siler ve WinDivert kilitlerini best-effort durdurur. Böylece eski `SeqDPI.exe` veya motor açıkken yeniden kurulumda çıkan `Delete failed, code 5, Access denied` hatası engellenir.
+
 ## Sesler
 
 - `hello.mp3`: program ilk açıldığında arka planda çalar
@@ -23,20 +27,8 @@ Bu iki dosya varsa PyInstaller otomatik exe içine paketler.
 ./build_installer.ps1
 ```
 
-Script şunları yapar:
+Çıktı:
 
-1. `SeqDPI.exe` üretir
-2. `hello.mp3` ve `dns.mp3` varsa exe içine koyar
-3. GoodbyeDPI-Turkey motorunu setup içine paketler
-4. Inno Setup yoksa otomatik kurmayı dener
-5. `dist/installer/SeqDPI-Setup.exe` üretir
-
-## Inno Setup elle kurulacaksa
-
-Sadece bunu çalıştır:
-
-```powershell
-winget install --id JRSoftware.InnoSetup --exact
+```text
+dist/installer/SeqDPI-Setup.exe
 ```
-
-`veya choco...` aynı satıra yazılmayacak. O kelime komut değil.
