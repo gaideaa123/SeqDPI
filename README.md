@@ -1,53 +1,66 @@
 # SeqDPI
 
-SeqDPI, Türkiye için tek butonlu Windows DPI yardımcı uygulaması.
+SeqDPI, Türkiye için tek tık Windows DPI yardımcı uygulaması.
 
-Bu sürüm çalışan ağ çekirdeğini bozmadan arayüzü yeniler: neon renkli, animasyonlu, CMD göstermeyen, tek dosya **SeqDPI.exe**.
+Kullanıcı tarafında hedef akış basit: **SeqDPI-Setup.exe** açılır, Next denir, kurulum biter, masaüstüne **SeqDPI** gelir. Kullanıcı sonra masaüstündeki kısayola basar ve neon GUI açılır.
 
-## Yeni GUI
+## Kullanıcıya verilecek dosya
 
-- Animasyonlu neon arka plan
-- Büyük tek tuş açma alanı
-- Canlı durum halkası
-- Renkli canlı günlük
-- Erişimi aç, sıradaki yöntem, test ve kapat aksiyonları
-- Roblox ve Discord hızlı butonları
-- Konsolsuz `SeqDPI.pyw` launcher
-
-## Çalıştırma
-
-Geliştirme için:
-
-```powershell
-python seqdpi.py
+```text
+SeqDPI-Setup.exe
 ```
 
-Yeni konsolsuz GUI:
+Bu dosya GitHub Actions artifact olarak `SeqDPI-Setup` adıyla üretilir.
 
-```powershell
-pythonw SeqDPI.pyw
-```
+## Kurulum deneyimi
 
-Exe üretmek için:
+- Modern setup sihirbazı
+- Yönetici izni ister
+- `Program Files\SeqDPI` altına kurar
+- Masaüstüne `SeqDPI` kısayolu ekler
+- Başlat menüsüne `SeqDPI` ekler
+- GoodbyeDPI-Turkey motorunu setup içine paketler
+- İlk açılışta ayrıca motor indirmeye gerek kalmaz
+- İsterse kurulum bitince uygulamayı açar
+- Kullanıcı build/dist klasörü görmez
+
+## Geliştirici komutları
+
+Sadece exe üretmek:
 
 ```powershell
 ./build_exe.ps1
 ```
 
-Çıktı:
+Setup üretmek:
+
+```powershell
+./build_installer.ps1
+```
+
+Çıktılar:
 
 ```text
 dist/SeqDPI.exe
+dist/installer/SeqDPI-Setup.exe
 ```
 
-## Exe özellikleri
+## Gerekli araçlar
 
-- Dosya adı: `SeqDPI.exe`
-- Konsol yok: PyInstaller `--windowed`
-- Yönetici izni ister: PyInstaller `--uac-admin`
-- Tek dosya: PyInstaller `--onefile`
-- GitHub Actions artifact: `SeqDPI-windows-exe`
+Yerel installer build için Inno Setup gerekir:
+
+```powershell
+winget install JRSoftware.InnoSetup
+```
+
+veya:
+
+```powershell
+choco install innosetup -y
+```
+
+GitHub Actions bunu otomatik kurar.
 
 ## Not
 
-Çalışan DPI/DNS mantığına dokunulmadı. Yeni GUI `seqdpi.py` içindeki sağlam çekirdeği import eder.
+Çalışan DPI/DNS çekirdeğine dokunulmadı. Bu PR sadece kullanıcı dostu kurulum deneyimi ekler.
