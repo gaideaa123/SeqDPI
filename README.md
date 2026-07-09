@@ -1,38 +1,39 @@
 # SeqDPI
 
-SeqDPI, Windows için tek butonlu bir erişim profili uygulaması. GUI üzerinden aktif ağ adaptörlerinin DNS ayarını Cloudflare DNS'e çeker, DNS önbelleğini temizler ve Roblox ile Discord bağlantılarını kontrol eder.
+SeqDPI artık proxy denemesi değil, Windows paket seviyesinde sistem modu açan tek butonlu bir GUI.
 
-## Özellikler
+Araştırma sonucu net: GoodbyeDPI tarayıcı proxy'si gibi çalışmıyor. WinDivert sürücüsüyle TCP paketlerini yakalıyor ve DPI cihazlarının gördüğü paketleri bozarken gerçek hedef sunucunun bağlantıyı kabul etmesini sağlıyor. Bu yüzden sistem proxy'sini yok sayan oyun istemcileri için de doğru yön bu.
 
-- Tek butonla DNS profilini uygular
-- Yönetici izni yoksa kendini UAC ile yeniden açar
-- Aktif ağ adaptörlerini otomatik bulur
-- IPv4 ve IPv6 DNS sunucularını ayarlar
+## Ne yapar?
+
+- GoodbyeDPI'nin son resmi release paketini indirir
+- `goodbyedpi.exe` motorunu WinDivert ile yönetici olarak çalıştırır
+- En güçlü hazır preset olan `-9` ile başlar
+- Çalışmazsa GUI'den `-8` ve `-7` alternatiflerine geçebilir
+- DNS'i Cloudflare IPv4/IPv6 üstüne alır
 - DNS önbelleğini temizler
-- Roblox ve Discord için hızlı bağlantı kontrolü yapar
-- İstersen tek tıkla eski otomatik DNS ayarına döner
+- Roblox, Discord ve genel HTTPS çözümlemesini kontrol eder
+- Tek butonla motoru durdurur ve DNS'i otomatiğe döndürür
 
 ## Çalıştırma
 
-Windows üzerinde Python 3.11 veya üstü yeterli.
+Windows üzerinde Python 3.11 veya üstü:
 
 ```powershell
 python seqdpi.py
 ```
 
-Uygulama sistem DNS ayarlarını değiştirdiği için yönetici izni ister.
+Yönetici izni gerekir. İlk çalıştırmada GoodbyeDPI motoru `%APPDATA%/SeqDPI/engine` altına indirilir.
 
-## Tek dosya exe üretme
-
-İstersen PyInstaller ile tek dosyalık exe alabilirsin:
+## Exe üretme
 
 ```powershell
 pip install pyinstaller
 pyinstaller --onefile --windowed --name SeqDPI seqdpi.py
 ```
 
-Çıktı `dist/SeqDPI.exe` altında oluşur.
+## Notlar
 
-## Not
-
-Bu sürüm DNS tabanlı erişim sorunlarını hedefler. Operatör tarafında DNS dışı filtreleme varsa bağlantı testi uyarı verebilir. Bu durumda bir sonraki adım Windows paket katmanı entegrasyonu olur.
+- Bu sürüm sistem proxy'si değil, WinDivert tabanlı paket yakalama kullanır.
+- Erişim engeli DPI tabanlıysa önce `Sistem geneli`, sonra `Alternatif 1`, sonra `Alternatif 2` denenmeli.
+- Roblox erişimi bazı dönemlerde DNS, IP, TLS SNI ve uygulama istemcisi davranışına göre değişebiliyor. Bu yüzden tek DNS değişikliği yetmez.

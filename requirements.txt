@@ -1,3 +1,4 @@
-# No third-party runtime dependencies.
+# Runtime dependency yok.
+# İlk çalıştırmada resmi GoodbyeDPI release zip'i indirilir.
 # Optional build dependency:
 # pyinstaller

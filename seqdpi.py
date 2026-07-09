@@ -1,101 +1,170 @@
 import ctypes
+import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
+import zipfile
+from pathlib import Path
 from tkinter import messagebox, ttk
-from urllib.request import urlopen, Request
+from urllib.request import Request, urlopen
 
 APP_NAME = "SeqDPI"
-DNS_SERVERS = [
-    "1.1.1.1",
-    "1.0.0.1",
-    "2606:4700:4700::1111",
-    "2606:4700:4700::1001",
+APP_DIR = Path(os.getenv("APPDATA", str(Path.home()))) / APP_NAME
+ENGINE_DIR = APP_DIR / "engine"
+DOWNLOAD_ZIP = APP_DIR / "goodbyedpi.zip"
+DNS_SERVERS = ["1.1.1.1", "1.0.0.1", "2606:4700:4700::1111", "2606:4700:4700::1001"]
+CHECK_HOSTS = ["roblox.com", "auth.roblox.com", "games.roblox.com", "discord.com", "gateway.discord.gg", "wikipedia.org"]
+QUICK_LINKS = {"Roblox": "https://www.roblox.com/", "Discord": "https://discord.com/app"}
+
+# GoodbyeDPI is the driver-level part. -9 is the strongest built-in preset and is intentionally
+# system-wide because it works through WinDivert packet interception, not browser proxy settings.
+GOODBYEDPI_PRESETS = [
+    ("Sistem geneli", ["-9"]),
+    ("Alternatif 1", ["-8"]),
+    ("Alternatif 2", ["-7"]),
 ]
-CHECK_HOSTS = ["roblox.com", "discord.com", "api.roblox.com", "gateway.discord.gg"]
-QUICK_LINKS = {
-    "Roblox": "https://www.roblox.com/",
-    "Discord": "https://discord.com/app",
-}
 
 
 class Runner:
-    def run(self, args, timeout=30):
+    def run(self, args, timeout=40):
         startupinfo = None
         if os.name == "nt":
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-
-        completed = subprocess.run(
-            args,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout,
-            startupinfo=startupinfo,
-        )
+        completed = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout, startupinfo=startupinfo)
         output = (completed.stdout + completed.stderr).strip()
         if completed.returncode != 0:
             raise RuntimeError(output or f"Komut başarısız: {args[0]}")
         return output
 
-    def powershell(self, command, timeout=30):
-        return self.run(
-            [
-                "powershell",
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-                command,
-            ],
-            timeout=timeout,
-        )
+    def powershell(self, command, timeout=40):
+        return self.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command], timeout=timeout)
+
+
+class EngineManager:
+    def __init__(self, log):
+        self.log = log
+
+    def exe_path(self):
+        candidates = list(ENGINE_DIR.rglob("goodbyedpi.exe"))
+        if not candidates:
+            return None
+        x64 = [path for path in candidates if "x86_64" in str(path).lower() or "x64" in str(path).lower()]
+        return x64[0] if x64 else candidates[0]
+
+    def ensure(self):
+        existing = self.exe_path()
+        if existing:
+            return existing
+        APP_DIR.mkdir(parents=True, exist_ok=True)
+        self.log("GoodbyeDPI motoru indiriliyor, ilk kurulum biraz sürebilir.")
+        release = self.github_json("https://api.github.com/repos/ValdikSS/GoodbyeDPI/releases/latest")
+        asset_url = self.pick_release_zip(release)
+        self.download(asset_url, DOWNLOAD_ZIP)
+        if ENGINE_DIR.exists():
+            shutil.rmtree(ENGINE_DIR)
+        ENGINE_DIR.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(DOWNLOAD_ZIP) as archive:
+            archive.extractall(ENGINE_DIR)
+        exe = self.exe_path()
+        if not exe:
+            raise RuntimeError("goodbyedpi.exe indirilen pakette bulunamadı.")
+        self.log(f"Motor hazır: {exe.parent.name}")
+        return exe
+
+    def github_json(self, url):
+        request = Request(url, headers={"User-Agent": APP_NAME, "Accept": "application/vnd.github+json"})
+        with urlopen(request, timeout=30) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    def pick_release_zip(self, release):
+        assets = release.get("assets", [])
+        for asset in assets:
+            name = asset.get("name", "").lower()
+            if name.endswith(".zip") and "source" not in name:
+                return asset["browser_download_url"]
+        raise RuntimeError("GoodbyeDPI release zip dosyası bulunamadı.")
+
+    def download(self, url, target):
+        request = Request(url, headers={"User-Agent": APP_NAME})
+        with urlopen(request, timeout=60) as response, target.open("wb") as file:
+            shutil.copyfileobj(response, file)
 
 
 class NetworkProfile:
-    def __init__(self):
+    def __init__(self, log):
         self.runner = Runner()
+        self.engine = EngineManager(log)
+        self.process = None
+        self.active_preset = None
+        self.log = log
 
     def adapters(self):
-        command = (
-            "Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | "
-            "Select-Object -ExpandProperty Name"
-        )
+        command = "Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | Select-Object -ExpandProperty Name"
         output = self.runner.powershell(command)
         names = [line.strip() for line in output.splitlines() if line.strip()]
         if not names:
             raise RuntimeError("Aktif ağ adaptörü bulamadım.")
         return names
 
-    def enable(self):
+    def enable_dns(self):
         names = self.adapters()
         quoted_dns = ",".join(f"'{server}'" for server in DNS_SERVERS)
         for name in names:
             safe_name = name.replace("'", "''")
-            command = (
-                f"Set-DnsClientServerAddress -InterfaceAlias '{safe_name}' "
-                f"-ServerAddresses ({quoted_dns})"
-            )
-            self.runner.powershell(command)
-        self.flush_dns()
+            self.runner.powershell(f"Set-DnsClientServerAddress -InterfaceAlias '{safe_name}' -ServerAddresses ({quoted_dns})")
+        self.runner.run(["ipconfig", "/flushdns"])
         return names
 
-    def restore(self):
+    def restore_dns(self):
         names = self.adapters()
         for name in names:
             safe_name = name.replace("'", "''")
-            command = f"Set-DnsClientServerAddress -InterfaceAlias '{safe_name}' -ResetServerAddresses"
-            self.runner.powershell(command)
-        self.flush_dns()
+            self.runner.powershell(f"Set-DnsClientServerAddress -InterfaceAlias '{safe_name}' -ResetServerAddresses")
+        self.runner.run(["ipconfig", "/flushdns"])
         return names
 
-    def flush_dns(self):
-        self.runner.run(["ipconfig", "/flushdns"])
+    def enable(self, preset_index=0):
+        adapters = self.enable_dns()
+        exe = self.engine.ensure()
+        self.stop_engine()
+        label, args = GOODBYEDPI_PRESETS[preset_index]
+        self.active_preset = label
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        self.process = subprocess.Popen([str(exe), *args], cwd=str(exe.parent), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", startupinfo=startupinfo)
+        time.sleep(1.2)
+        if self.process.poll() is not None:
+            output = self.process.stdout.read() if self.process.stdout else ""
+            raise RuntimeError(output.strip() or "GoodbyeDPI motoru başladıktan hemen sonra kapandı.")
+        return adapters, label, " ".join(args)
+
+    def try_next_preset(self):
+        current = 0
+        for index, (label, _) in enumerate(GOODBYEDPI_PRESETS):
+            if label == self.active_preset:
+                current = index
+                break
+        next_index = min(current + 1, len(GOODBYEDPI_PRESETS) - 1)
+        return self.enable(next_index)
+
+    def stop_engine(self):
+        if self.process and self.process.poll() is None:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=4)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+        self.process = None
+
+    def restore(self):
+        self.stop_engine()
+        return self.restore_dns()
 
     def resolve_report(self):
         results = []
@@ -107,10 +176,10 @@ class NetworkProfile:
                 results.append((host, False))
         return results
 
-    def http_probe(self):
-        request = Request("https://www.roblox.com/", headers={"User-Agent": APP_NAME})
+    def probe(self, url):
         try:
-            with urlopen(request, timeout=8) as response:
+            request = Request(url, headers={"User-Agent": APP_NAME})
+            with urlopen(request, timeout=12) as response:
                 return 200 <= response.status < 500
         except Exception:
             return False
@@ -137,21 +206,21 @@ def relaunch_as_admin():
 class SeqDPIApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.profile = NetworkProfile()
+        self.profile = NetworkProfile(self.log)
         self.configure_app()
         self.build_ui()
         self.after(250, self.initial_check)
 
     def configure_app(self):
         self.title(APP_NAME)
-        self.geometry("720x520")
-        self.minsize(640, 480)
+        self.geometry("780x580")
+        self.minsize(680, 520)
         self.configure(bg="#f7f5ef")
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
         try:
             ctypes.windll.shcore.SetProcessDpiAwareness(1)
         except Exception:
             pass
-
         style = ttk.Style(self)
         style.theme_use("clam")
         style.configure("TFrame", background="#f7f5ef")
@@ -165,76 +234,45 @@ class SeqDPIApp(tk.Tk):
     def build_ui(self):
         shell = ttk.Frame(self, padding=(34, 30, 34, 26))
         shell.pack(fill="both", expand=True)
-
-        eyebrow = ttk.Label(shell, text="WINDOWS DNS PROFİLİ", style="Muted.TLabel")
-        eyebrow.pack(anchor="w")
-
-        title = ttk.Label(shell, text="Tek tuşla erişim profili", style="Title.TLabel")
-        title.pack(anchor="w", pady=(6, 0))
-
-        body = ttk.Label(
-            shell,
-            text="Roblox ve Discord için DNS profilini Cloudflare üstüne alır, önbelleği temizler, sonra bağlantıyı kontrol eder.",
-            style="Body.TLabel",
-            wraplength=620,
-        )
-        body.pack(anchor="w", pady=(10, 24))
+        ttk.Label(shell, text="WINDIVERT SİSTEM MODU", style="Muted.TLabel").pack(anchor="w")
+        ttk.Label(shell, text="Proxy değil, paket seviyesinde çalışır", style="Title.TLabel").pack(anchor="w", pady=(6, 0))
+        ttk.Label(shell, text="GoodbyeDPI motorunu indirir, DNS'i düzeltir ve WinDivert ile tüm bilgisayardaki TCP trafiğine DPI atlatma uygular. Tarayıcı ayarı değil, sistem geneli mod.", style="Body.TLabel", wraplength=680).pack(anchor="w", pady=(10, 24))
 
         actions = ttk.Frame(shell)
         actions.pack(fill="x", pady=(0, 20))
-
-        self.main_button = ttk.Button(actions, text="Engeli aç", style="Action.TButton", command=self.enable_profile)
+        self.main_button = ttk.Button(actions, text="Erişim engelini aç", style="Action.TButton", command=self.enable_profile)
         self.main_button.pack(side="left")
-
-        self.restore_button = ttk.Button(actions, text="DNS'i geri al", style="Ghost.TButton", command=self.restore_profile)
+        self.next_button = ttk.Button(actions, text="Alternatif modu dene", style="Ghost.TButton", command=self.try_next)
+        self.next_button.pack(side="left", padx=(12, 0))
+        self.restore_button = ttk.Button(actions, text="Tamamen kapat", style="Ghost.TButton", command=self.restore_profile)
         self.restore_button.pack(side="left", padx=(12, 0))
-
-        self.roblox_button = ttk.Button(actions, text="Roblox", style="Ghost.TButton", command=lambda: self.open_link("Roblox"))
-        self.roblox_button.pack(side="right", padx=(8, 0))
-
-        self.discord_button = ttk.Button(actions, text="Discord", style="Ghost.TButton", command=lambda: self.open_link("Discord"))
-        self.discord_button.pack(side="right")
+        ttk.Button(actions, text="Roblox", style="Ghost.TButton", command=lambda: self.open_link("Roblox")).pack(side="right", padx=(8, 0))
+        ttk.Button(actions, text="Discord", style="Ghost.TButton", command=lambda: self.open_link("Discord")).pack(side="right")
 
         self.status = ttk.Label(shell, text="Hazırlanıyor", style="Status.TLabel")
         self.status.pack(fill="x", pady=(0, 18))
-
-        log_label = ttk.Label(shell, text="İşlem günlüğü", style="Muted.TLabel")
-        log_label.pack(anchor="w", pady=(0, 8))
-
+        ttk.Label(shell, text="İşlem günlüğü", style="Muted.TLabel").pack(anchor="w", pady=(0, 8))
         log_frame = tk.Frame(shell, bg="#2b261f", highlightthickness=0)
         log_frame.pack(fill="both", expand=True)
-
-        self.log_box = tk.Text(
-            log_frame,
-            bg="#2b261f",
-            fg="#f3ede3",
-            insertbackground="#f3ede3",
-            relief="flat",
-            padx=18,
-            pady=16,
-            font=("Cascadia Mono", 10),
-            wrap="word",
-        )
+        self.log_box = tk.Text(log_frame, bg="#2b261f", fg="#f3ede3", insertbackground="#f3ede3", relief="flat", padx=18, pady=16, font=("Cascadia Mono", 10), wrap="word")
         self.log_box.pack(fill="both", expand=True)
         self.log_box.configure(state="disabled")
 
     def initial_check(self):
         if not is_windows():
-            self.set_busy(False)
-            self.status.configure(text="Bu sürüm Windows için hazırlandı.")
-            self.log("Windows dışında sistem DNS ayarı yapmam. Kod tarafı güvenli kalsın diye böyle.")
+            self.status.configure(text="Bu sürüm Windows için.")
+            self.log("WinDivert yalnız Windows tarafında çalışır.")
             self.main_button.configure(state="disabled")
+            self.next_button.configure(state="disabled")
             self.restore_button.configure(state="disabled")
             return
-
         if not is_admin():
             self.status.configure(text="Yönetici izni gerekiyor.")
-            self.log("DNS ayarı için yönetici izni lazım. Butona basınca UAC penceresi açılacak.")
+            self.log("WinDivert sürücüsü ve DNS ayarı için yönetici izni şart.")
             self.main_button.configure(text="Yönetici olarak aç", command=self.elevate)
             return
-
-        self.status.configure(text="Hazır. Butona bas, DNS profili aktif olsun.")
-        self.log("Yönetici izni tamam. Aktif ağ adaptörlerini değiştirebilirim.")
+        self.status.configure(text="Hazır. Bu sürüm GoodbyeDPI motoru kullanıyor.")
+        self.log("Yönetici izni tamam. Proxy değil, paket seviyesinde mod açılacak.")
 
     def elevate(self):
         try:
@@ -243,69 +281,84 @@ class SeqDPIApp(tk.Tk):
         except Exception as exc:
             messagebox.showerror(APP_NAME, f"Yönetici olarak açılamadı:\n{exc}")
 
-    def run_background(self, target):
-        self.set_busy(True)
-        thread = threading.Thread(target=target, daemon=True)
-        thread.start()
-
     def enable_profile(self):
-        if not is_admin():
-            self.elevate()
-            return
+        self.run_background(lambda: self.enable_with_preset(0))
 
-        def work():
-            try:
-                self.safe_status("DNS profili uygulanıyor")
-                adapters = self.profile.enable()
-                self.log(f"DNS ayarlandı: {', '.join(adapters)}")
-                self.log("DNS önbelleği temizlendi.")
-                self.check_connectivity()
-            except Exception as exc:
-                self.safe_status("İşlem başarısız")
-                self.log(f"Hata: {exc}")
-                messagebox.showerror(APP_NAME, str(exc))
-            finally:
-                self.set_busy(False)
+    def try_next(self):
+        self.run_background(self.enable_next)
 
-        self.run_background(work)
+    def enable_with_preset(self, index):
+        try:
+            self.safe_status("Sistem modu açılıyor")
+            adapters, label, args = self.profile.enable(index)
+            self.log(f"DNS ayarlandı: {', '.join(adapters)}")
+            self.log(f"GoodbyeDPI çalışıyor: {label} ({args})")
+            self.check_connectivity()
+        except Exception as exc:
+            self.safe_status("İşlem başarısız")
+            self.log(f"Hata: {exc}")
+            messagebox.showerror(APP_NAME, str(exc))
+        finally:
+            self.set_busy(False)
+
+    def enable_next(self):
+        try:
+            self.safe_status("Alternatif mod deneniyor")
+            adapters, label, args = self.profile.try_next_preset()
+            self.log(f"Alternatif aktif: {label} ({args})")
+            self.check_connectivity()
+        except Exception as exc:
+            self.safe_status("Alternatif mod başarısız")
+            self.log(f"Hata: {exc}")
+            messagebox.showerror(APP_NAME, str(exc))
+        finally:
+            self.set_busy(False)
 
     def restore_profile(self):
         def work():
             try:
-                self.safe_status("DNS ayarı geri alınıyor")
+                self.safe_status("Kapatılıyor")
                 adapters = self.profile.restore()
-                self.log(f"Otomatik DNS'e dönüldü: {', '.join(adapters)}")
-                self.safe_status("Geri alındı. Eski ağ profilindesin.")
+                self.log(f"GoodbyeDPI kapandı, DNS otomatiğe döndü: {', '.join(adapters)}")
+                self.safe_status("Kapandı. Eski ağ profilindesin.")
             except Exception as exc:
-                self.safe_status("Geri alma başarısız")
+                self.safe_status("Kapatma başarısız")
                 self.log(f"Hata: {exc}")
                 messagebox.showerror(APP_NAME, str(exc))
             finally:
                 self.set_busy(False)
-
         self.run_background(work)
 
     def check_connectivity(self):
-        self.safe_status("Roblox ve Discord kontrol ediliyor")
-        report = self.profile.resolve_report()
-        for host, ok in report:
+        self.safe_status("Bağlantılar kontrol ediliyor")
+        for host, ok in self.profile.resolve_report():
             self.log(f"{'OK' if ok else 'FAIL'}  {host}")
-        if self.profile.http_probe():
-            self.log("OK  roblox web yanıt verdi")
-            self.safe_status("Bitti. Roblox ve Discord'u deneyebilirsin.")
-        else:
-            self.log("Uyarı: Roblox web testi yanıt vermedi. DNS dışı engel varsa bu tek başına yetmeyebilir.")
-            self.safe_status("DNS profili aktif, ama bağlantı testi net değil.")
+        roblox = self.profile.probe("https://www.roblox.com/")
+        discord = self.profile.probe("https://discord.com/")
+        self.log(f"{'OK' if roblox else 'FAIL'}  Roblox web testi")
+        self.log(f"{'OK' if discord else 'FAIL'}  Discord web testi")
+        self.safe_status("Aktif. Olmazsa 'Alternatif modu dene' butonuna bas.")
+
+    def run_background(self, target):
+        self.set_busy(True)
+        threading.Thread(target=target, daemon=True).start()
 
     def open_link(self, name):
         import webbrowser
-
         webbrowser.open(QUICK_LINKS[name])
+
+    def on_close(self):
+        if messagebox.askyesno(APP_NAME, "Kapatırken motoru durdurup DNS'i geri alayım mı?"):
+            try:
+                self.profile.restore()
+            except Exception:
+                pass
+        self.destroy()
 
     def set_busy(self, busy):
         state = "disabled" if busy else "normal"
-        self.main_button.configure(state=state)
-        self.restore_button.configure(state=state)
+        for button in (self.main_button, self.next_button, self.restore_button):
+            button.configure(state=state)
 
     def safe_status(self, text):
         self.after(0, lambda: self.status.configure(text=text))
@@ -316,7 +369,6 @@ class SeqDPIApp(tk.Tk):
             self.log_box.insert("end", f"• {message}\n")
             self.log_box.see("end")
             self.log_box.configure(state="disabled")
-
         self.after(0, append)
 
 
