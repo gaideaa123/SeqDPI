@@ -1,15 +1,16 @@
 # SeqDPI
 
-## Discord invalid session fix
+## Friend-safe DNS mode
 
-Bu sürüm Discord tarafında görülen `[SSL: INVALID_SESSION_ID]` probe hatasını düzeltir.
+Bu sürüm arkadaşının ağındaki hatayı hedefler: public DNS profilleri otomatik yazılmaz.
 
 Ne değişti:
 
-- Discord için agresif `-7/-8/-9` yerine önce daha uyumlu `-2`, `-1`, `-4` denenir
-- Health check önce Windows `curl.exe` ile yapılır, Python OpenSSL'in false negative hatasına takılmaz
-- Python fallback içinde TLS session ticket kapatılır
-- `INVALID_SESSION_ID` artık doğrudan metod başarısızlığı sayılmaz, TLS'in hedefe ulaştığı sinyal olarak loglanır
-- Discord web, gateway, update ve CDN kontrolleri yine korunur
+- Cloudflare, Google, Yandex DNS artık başlangıçta zorla denenmez
+- Önce mevcut DNS korunur
+- Mevcut DNS doğrulanamazsa sadece otomatik/DHCP DNS'e dönmeyi dener
+- DNS yine doğrulanamazsa program durmaz, DPI metodlarını çalıştırmaya devam eder
+- Kapatırken kullanıcının DNS ayarını gereksiz yere bozmaz
+- DNS artık başarı kapısı değil, sadece teşhis sinyali
 
-Kısaca: Roblox çalışırken Discord'u öldüren agresif fragmentation daha geç denenir, Discord için daha uyumlu modlar öne alınır.
+Bu özellikle public DNS'i bloklayan modem/ISS/güvenlik yazılımı olan bilgisayarlarda daha güvenlidir.
