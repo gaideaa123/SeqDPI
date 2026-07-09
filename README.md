@@ -21,22 +21,17 @@ Bu dosya GitHub Actions artifact olarak `SeqDPI-Setup` adıyla üretilir.
 - Başlat menüsüne `SeqDPI` ekler
 - GoodbyeDPI-Turkey motorunu setup içine paketler
 - İlk açılışta ayrıca motor indirmeye gerek kalmaz
-- İsterse kurulum bitince uygulamayı açar
 - Kullanıcı build/dist klasörü görmez
 
 ## Geliştirici komutları
 
-Sadece exe üretmek:
-
-```powershell
-./build_exe.ps1
-```
-
-Setup üretmek:
+Setup üretmek için tek komut:
 
 ```powershell
 ./build_installer.ps1
 ```
+
+Script önce `SeqDPI.exe` üretir, sonra Inno Setup yoksa otomatik kurmayı dener, ardından installer üretir.
 
 Çıktılar:
 
@@ -45,22 +40,20 @@ dist/SeqDPI.exe
 dist/installer/SeqDPI-Setup.exe
 ```
 
-## Gerekli araçlar
+## Inno Setup elle kurulacaksa
 
-Yerel installer build için Inno Setup gerekir:
+Aynı satıra `veya` yazma. Şunlardan sadece birini çalıştır:
 
 ```powershell
-winget install JRSoftware.InnoSetup
+winget install --id JRSoftware.InnoSetup --exact
 ```
 
-veya:
+veya Chocolatey kuruluysa:
 
 ```powershell
 choco install innosetup -y
 ```
 
-GitHub Actions bunu otomatik kurar.
-
 ## Not
 
-Çalışan DPI/DNS çekirdeğine dokunulmadı. Bu PR sadece kullanıcı dostu kurulum deneyimi ekler.
+Çalışan DPI/DNS çekirdeğine dokunulmadı. Bu PR sadece installer build deneyimini daha kolay yapar.
