@@ -35,11 +35,6 @@ CREATE_NO_WINDOW = 0x08000000
 CREATE_NEW_PROCESS_GROUP = 0x00000200
 MOVEFILE_DELAY_UNTIL_REBOOT = 0x00000004
 
-DNS_PROFILES = [
-    ("Cloudflare", ["1.1.1.1", "1.0.0.1", "2606:4700:4700::1111", "2606:4700:4700::1001"]),
-    ("Google", ["8.8.8.8", "8.8.4.4", "2001:4860:4860::8888", "2001:4860:4860::8844"]),
-    ("Yandex", ["77.88.8.8", "77.88.8.1", "2a02:6b8::feed:0ff", "2a02:6b8:0:1::feed:0ff"]),
-]
 DISCORD_HOSTS = [
     "discord.com", "gateway.discord.gg", "cdn.discordapp.com", "media.discordapp.net",
     "images-ext-1.discordapp.net", "discordapp.com", "discordapp.net", "discord.gg",
@@ -148,32 +143,30 @@ class DnsManager:
     def __init__(self, runner, log):
         self.runner = runner
         self.log = log
+        self.touched_dns = False
 
     def adapters(self):
         _, out = self.runner.ps("Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | Select-Object -ExpandProperty Name")
-        names = [line.strip() for line in out.splitlines() if line.strip()]
-        return names
+        return [line.strip() for line in out.splitlines() if line.strip()]
 
-    def set_servers(self, label, servers):
+    def reset_to_automatic(self):
         names = self.adapters()
         if not names:
-            self.log("Aktif ağ adaptörü bulunamadı, DNS ayarı atlandı.")
+            self.log("Aktif ağ adaptörü bulunamadı, DNS onarımı atlandı.")
             return False
-        quoted = ",".join(f"'{server}'" for server in servers)
-        ok = False
         for name in names:
             safe = name.replace("'", "''")
-            code, out = self.runner.ps(f"Set-DnsClientServerAddress -InterfaceAlias '{safe}' -ServerAddresses ({quoted})")
-            ok = ok or code == 0
+            self.runner.ps(f"Set-DnsClientServerAddress -InterfaceAlias '{safe}' -ResetServerAddresses")
+        self.touched_dns = True
         self.flush()
-        self.log(f"DNS {label} olarak ayarlandı: {', '.join(names)}")
-        return ok
+        self.log(f"DNS otomatik/DHCP moda alındı: {', '.join(names)}")
+        return True
 
     def restore(self):
-        for name in self.adapters():
-            safe = name.replace("'", "''")
-            self.runner.ps(f"Set-DnsClientServerAddress -InterfaceAlias '{safe}' -ResetServerAddresses")
-        self.flush()
+        if not self.touched_dns:
+            self.log("DNS'e dokunulmadı, geri alma atlandı.")
+            return
+        self.reset_to_automatic()
         self.log("DNS otomatiğe döndü.")
 
     def flush(self):
@@ -183,30 +176,21 @@ class DnsManager:
         return dns_resolves("discord.com") or dns_resolves("roblox.com") or dns_resolves("wikipedia.org")
 
     def establish_working_dns(self):
-        # Critical change: DNS preflight is advisory. Some networks block every public resolver,
-        # but a DPI method can still be useful. Never stop startup here.
+        # Friend-safe mode: never write public DNS profiles automatically. Some routers/ISPs block
+        # public resolvers; forcing Cloudflare/Google/Yandex can break an otherwise usable network.
+        self.flush()
         if self.dns_is_ok():
-            self.log("Mevcut DNS zaten çalışıyor, değiştirmeden devam.")
+            self.log("Mevcut DNS çalışıyor, DNS ayarı değiştirilmedi.")
             return "current"
-        errors = []
-        for label, servers in DNS_PROFILES:
-            try:
-                self.set_servers(label, servers)
-                if self.dns_is_ok():
-                    self.log(f"DNS sağlık kontrolü OK: {label}")
-                    return label
-                errors.append(f"{label}: çözümleme yok")
-            except Exception as exc:
-                errors.append(f"{label}: {exc}")
+        self.log("Mevcut DNS doğrulanamadı. Public DNS yazılmayacak, önce otomatik DNS deneniyor.")
         try:
-            self.restore()
+            self.reset_to_automatic()
             if self.dns_is_ok():
-                self.log("DNS otomatik profil ile çalıştı.")
+                self.log("Otomatik DNS ile çözümleme düzeldi.")
                 return "automatic"
         except Exception as exc:
-            errors.append(f"automatic: {exc}")
-        self.log("Uyarı: hiçbir DNS profili doğrulanamadı, ama motor yine denenecek.")
-        self.log("DNS deneme özeti: " + " | ".join(errors[-4:]))
+            self.log(f"Otomatik DNS onarımı başarısız: {exc}")
+        self.log("Uyarı: DNS doğrulanamadı, ama SeqDPI motoru yine de çalıştırılacak.")
         return "unverified"
 
 class WindowsTweaks:
