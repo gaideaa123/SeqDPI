@@ -11,39 +11,50 @@ import tkinter as tk
 import zipfile
 from pathlib import Path
 from tkinter import messagebox, ttk
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+try:
+    import winreg
+except ImportError:
+    winreg = None
 
 APP_NAME = "SeqDPI"
 APP_DIR = Path(os.getenv("APPDATA", str(Path.home()))) / APP_NAME
 ENGINE_DIR = APP_DIR / "engine"
-DOWNLOAD_ZIP = APP_DIR / "goodbyedpi.zip"
+DOWNLOAD_ZIP = APP_DIR / "goodbyedpi-turkey.zip"
 DNS_SERVERS = ["1.1.1.1", "1.0.0.1", "2606:4700:4700::1111", "2606:4700:4700::1001"]
 CHECK_HOSTS = ["roblox.com", "auth.roblox.com", "games.roblox.com", "discord.com", "gateway.discord.gg", "wikipedia.org"]
 QUICK_LINKS = {"Roblox": "https://www.roblox.com/", "Discord": "https://discord.com/app"}
+QUIC_RULE = "SeqDPI Block QUIC HTTP3"
 
-# GoodbyeDPI is the driver-level part. -9 is the strongest built-in preset and is intentionally
-# system-wide because it works through WinDivert packet interception, not browser proxy settings.
+# The important bit from the research: DNS changing is not enough, and plain -9 can still lose
+# when the ISP poisons/intercepts DNS. These presets use GoodbyeDPI's own DNS redirection to a
+# resolver running on a non-standard port, then block QUIC/HTTP3 so browsers fall back to TCP where
+# WinDivert packet tricks apply.
+DNS_REDIR = ["--dns-addr", "77.88.8.8", "--dns-port", "1253", "--dnsv6-addr", "2a02:6b8::feed:0ff", "--dnsv6-port", "1253"]
 GOODBYEDPI_PRESETS = [
-    ("Sistem geneli", ["-9"]),
-    ("Alternatif 1", ["-8"]),
-    ("Alternatif 2", ["-7"]),
+    ("Türkiye DNS redir", ["-9", *DNS_REDIR]),
+    ("SNI parçalama", ["-f", "2", "-e", "2", "--wrong-seq", "--wrong-chksum", "--reverse-frag", "--frag-by-sni", "--max-payload", "-q", *DNS_REDIR]),
+    ("Uyumlu mod", ["-7", *DNS_REDIR]),
+    ("Eski uyumlu mod", ["-2", *DNS_REDIR]),
 ]
 
 
 class Runner:
-    def run(self, args, timeout=40):
+    def run(self, args, timeout=40, check=True):
         startupinfo = None
         if os.name == "nt":
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         completed = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout, startupinfo=startupinfo)
         output = (completed.stdout + completed.stderr).strip()
-        if completed.returncode != 0:
+        if check and completed.returncode != 0:
             raise RuntimeError(output or f"Komut başarısız: {args[0]}")
         return output
 
-    def powershell(self, command, timeout=40):
-        return self.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command], timeout=timeout)
+    def powershell(self, command, timeout=40, check=True):
+        return self.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command], timeout=timeout, check=check)
 
 
 class EngineManager:
@@ -62,8 +73,8 @@ class EngineManager:
         if existing:
             return existing
         APP_DIR.mkdir(parents=True, exist_ok=True)
-        self.log("GoodbyeDPI motoru indiriliyor, ilk kurulum biraz sürebilir.")
-        release = self.github_json("https://api.github.com/repos/ValdikSS/GoodbyeDPI/releases/latest")
+        self.log("Türkiye fork motoru indiriliyor, ilk kurulum biraz sürebilir.")
+        release = self.github_json("https://api.github.com/repos/cagritaskn/GoodbyeDPI-Turkey/releases/latest")
         asset_url = self.pick_release_zip(release)
         self.download(asset_url, DOWNLOAD_ZIP)
         if ENGINE_DIR.exists():
@@ -83,12 +94,11 @@ class EngineManager:
             return json.loads(response.read().decode("utf-8"))
 
     def pick_release_zip(self, release):
-        assets = release.get("assets", [])
-        for asset in assets:
+        for asset in release.get("assets", []):
             name = asset.get("name", "").lower()
             if name.endswith(".zip") and "source" not in name:
                 return asset["browser_download_url"]
-        raise RuntimeError("GoodbyeDPI release zip dosyası bulunamadı.")
+        raise RuntimeError("GoodbyeDPI Turkey release zip dosyası bulunamadı.")
 
     def download(self, url, target):
         request = Request(url, headers={"User-Agent": APP_NAME})
@@ -96,12 +106,48 @@ class EngineManager:
             shutil.copyfileobj(response, file)
 
 
+class WindowsTweaks:
+    def __init__(self, runner, log):
+        self.runner = runner
+        self.log = log
+
+    def apply(self):
+        self.block_quic()
+        self.disable_chromium_kyber()
+
+    def restore(self):
+        self.runner.run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={QUIC_RULE}"], check=False)
+        self.log("QUIC/HTTP3 engeli kaldırıldı.")
+
+    def block_quic(self):
+        self.runner.run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={QUIC_RULE}"], check=False)
+        self.runner.run([
+            "netsh", "advfirewall", "firewall", "add", "rule",
+            f"name={QUIC_RULE}", "dir=out", "action=block", "protocol=UDP", "remoteport=443",
+        ])
+        self.log("QUIC/HTTP3 kapatıldı. Tarayıcılar TCP'ye düşecek.")
+
+    def disable_chromium_kyber(self):
+        if winreg is None:
+            return
+        for path in (r"Software\Policies\Google\Chrome", r"Software\Policies\Microsoft\Edge"):
+            try:
+                key = winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_SET_VALUE)
+                winreg.SetValueEx(key, "PostQuantumKeyAgreementEnabled", 0, winreg.REG_DWORD, 0)
+                winreg.CloseKey(key)
+            except PermissionError:
+                self.log("Chrome/Edge Kyber policy yazılamadı. Yönetici iznini kontrol et.")
+                return
+        self.log("Chrome/Edge Kyber kapatıldı. Şişen ClientHello sorunu devre dışı.")
+
+
 class NetworkProfile:
     def __init__(self, log):
         self.runner = Runner()
         self.engine = EngineManager(log)
+        self.tweaks = WindowsTweaks(self.runner, log)
         self.process = None
-        self.active_preset = None
+        self.active_preset_index = 0
         self.log = log
 
     def adapters(self):
@@ -131,26 +177,21 @@ class NetworkProfile:
 
     def enable(self, preset_index=0):
         adapters = self.enable_dns()
+        self.tweaks.apply()
         exe = self.engine.ensure()
         self.stop_engine()
+        self.active_preset_index = preset_index
         label, args = GOODBYEDPI_PRESETS[preset_index]
-        self.active_preset = label
         startupinfo = subprocess.STARTUPINFO()
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        self.process = subprocess.Popen([str(exe), *args], cwd=str(exe.parent), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", startupinfo=startupinfo)
+        self.process = subprocess.Popen([str(exe), *args], cwd=str(exe.parent), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, startupinfo=startupinfo)
         time.sleep(1.2)
         if self.process.poll() is not None:
-            output = self.process.stdout.read() if self.process.stdout else ""
-            raise RuntimeError(output.strip() or "GoodbyeDPI motoru başladıktan hemen sonra kapandı.")
+            raise RuntimeError("GoodbyeDPI motoru başladıktan hemen sonra kapandı.")
         return adapters, label, " ".join(args)
 
     def try_next_preset(self):
-        current = 0
-        for index, (label, _) in enumerate(GOODBYEDPI_PRESETS):
-            if label == self.active_preset:
-                current = index
-                break
-        next_index = min(current + 1, len(GOODBYEDPI_PRESETS) - 1)
+        next_index = (self.active_preset_index + 1) % len(GOODBYEDPI_PRESETS)
         return self.enable(next_index)
 
     def stop_engine(self):
@@ -164,6 +205,7 @@ class NetworkProfile:
 
     def restore(self):
         self.stop_engine()
+        self.tweaks.restore()
         return self.restore_dns()
 
     def resolve_report(self):
@@ -178,11 +220,15 @@ class NetworkProfile:
 
     def probe(self, url):
         try:
-            request = Request(url, headers={"User-Agent": APP_NAME})
+            request = Request(url, headers={"User-Agent": "Mozilla/5.0 SeqDPI"})
             with urlopen(request, timeout=12) as response:
-                return 200 <= response.status < 500
-        except Exception:
-            return False
+                return response.status < 500, f"HTTP {response.status}"
+        except HTTPError as exc:
+            return exc.code < 500, f"HTTP {exc.code}"
+        except URLError as exc:
+            return False, str(exc.reason)
+        except Exception as exc:
+            return False, str(exc)
 
 
 def is_windows():
@@ -213,8 +259,8 @@ class SeqDPIApp(tk.Tk):
 
     def configure_app(self):
         self.title(APP_NAME)
-        self.geometry("780x580")
-        self.minsize(680, 520)
+        self.geometry("800x590")
+        self.minsize(700, 530)
         self.configure(bg="#f7f5ef")
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         try:
@@ -234,9 +280,9 @@ class SeqDPIApp(tk.Tk):
     def build_ui(self):
         shell = ttk.Frame(self, padding=(34, 30, 34, 26))
         shell.pack(fill="both", expand=True)
-        ttk.Label(shell, text="WINDIVERT SİSTEM MODU", style="Muted.TLabel").pack(anchor="w")
-        ttk.Label(shell, text="Proxy değil, paket seviyesinde çalışır", style="Title.TLabel").pack(anchor="w", pady=(6, 0))
-        ttk.Label(shell, text="GoodbyeDPI motorunu indirir, DNS'i düzeltir ve WinDivert ile tüm bilgisayardaki TCP trafiğine DPI atlatma uygular. Tarayıcı ayarı değil, sistem geneli mod.", style="Body.TLabel", wraplength=680).pack(anchor="w", pady=(10, 24))
+        ttk.Label(shell, text="TÜRKİYE DNS REDIR + WINDIVERT", style="Muted.TLabel").pack(anchor="w")
+        ttk.Label(shell, text="DNS zehrini de, QUIC kaçışını da kapatır", style="Title.TLabel").pack(anchor="w", pady=(6, 0))
+        ttk.Label(shell, text="GoodbyeDPI Turkey motorunu kullanır, DNS isteklerini non-standard porta yönlendirir, UDP 443/HTTP3'ü keser ve Chrome/Edge Kyber ClientHello şişmesini kapatır.", style="Body.TLabel", wraplength=700).pack(anchor="w", pady=(10, 24))
 
         actions = ttk.Frame(shell)
         actions.pack(fill="x", pady=(0, 20))
@@ -268,10 +314,10 @@ class SeqDPIApp(tk.Tk):
             return
         if not is_admin():
             self.status.configure(text="Yönetici izni gerekiyor.")
-            self.log("WinDivert sürücüsü ve DNS ayarı için yönetici izni şart.")
+            self.log("WinDivert, firewall ve DNS ayarı için yönetici izni şart.")
             self.main_button.configure(text="Yönetici olarak aç", command=self.elevate)
             return
-        self.status.configure(text="Hazır. Bu sürüm GoodbyeDPI motoru kullanıyor.")
+        self.status.configure(text="Hazır. Türkiye DNS redir modu açılacak.")
         self.log("Yönetici izni tamam. Proxy değil, paket seviyesinde mod açılacak.")
 
     def elevate(self):
@@ -333,10 +379,9 @@ class SeqDPIApp(tk.Tk):
         self.safe_status("Bağlantılar kontrol ediliyor")
         for host, ok in self.profile.resolve_report():
             self.log(f"{'OK' if ok else 'FAIL'}  {host}")
-        roblox = self.profile.probe("https://www.roblox.com/")
-        discord = self.profile.probe("https://discord.com/")
-        self.log(f"{'OK' if roblox else 'FAIL'}  Roblox web testi")
-        self.log(f"{'OK' if discord else 'FAIL'}  Discord web testi")
+        for name, url in (("Roblox web testi", "https://www.roblox.com/"), ("Discord web testi", "https://discord.com/")):
+            ok, detail = self.profile.probe(url)
+            self.log(f"{'OK' if ok else 'FAIL'}  {name} ({detail})")
         self.safe_status("Aktif. Olmazsa 'Alternatif modu dene' butonuna bas.")
 
     def run_background(self, target):
@@ -348,7 +393,7 @@ class SeqDPIApp(tk.Tk):
         webbrowser.open(QUICK_LINKS[name])
 
     def on_close(self):
-        if messagebox.askyesno(APP_NAME, "Kapatırken motoru durdurup DNS'i geri alayım mı?"):
+        if messagebox.askyesno(APP_NAME, "Kapatırken motoru durdurup DNS/firewall ayarlarını geri alayım mı?"):
             try:
                 self.profile.restore()
             except Exception:
