@@ -1,16 +1,25 @@
 # SeqDPI
 
-## Friend-safe DNS mode
+## En güncel arkadaş build'i
 
-Bu sürüm arkadaşının ağındaki hatayı hedefler: public DNS profilleri otomatik yazılmaz.
+Bu branch arkadaşın bilgisayarı için en güvenli mantığı hedefler:
 
-Ne değişti:
+- DNS'e public resolver dayatmaz
+- DNS başarısızsa bile motoru denemeye devam eder
+- Ping artmasın diye önce sadece hedef domainlere uygulanan modlar kullanılmalı
+- Roblox ve Discord dışı oyun trafiğine dokunulmamalı
+- Global DPI modları sadece son çare olmalı
 
-- Cloudflare, Google, Yandex DNS artık başlangıçta zorla denenmez
-- Önce mevcut DNS korunur
-- Mevcut DNS doğrulanamazsa sadece otomatik/DHCP DNS'e dönmeyi dener
-- DNS yine doğrulanamazsa program durmaz, DPI metodlarını çalıştırmaya devam eder
-- Kapatırken kullanıcının DNS ayarını gereksiz yere bozmaz
-- DNS artık başarı kapısı değil, sadece teşhis sinyali
+## Ping sorunu neden olur?
 
-Bu özellikle public DNS'i bloklayan modem/ISS/güvenlik yazılımı olan bilgisayarlarda daha güvenlidir.
+GoodbyeDPI/WinDivert tüm trafiğe uygulanırsa bazı oyunlarda lag spike veya ping artışı olabilir. Çözüm, sistemi komple kurcalamak değil, sadece engelli hedeflerin ilk bağlantı paketlerini hedeflemektir.
+
+## Arkadaşa verilecek dosya
+
+Sadece:
+
+```text
+SeqDPI-Setup.exe
+```
+
+Eski sürüm yüklüyse önce kaldırıp yeni setup ile kurması daha temiz olur.
