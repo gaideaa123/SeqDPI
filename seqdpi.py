@@ -23,13 +23,17 @@ except ImportError:
 
 APP_NAME = "SeqDPI"
 APP_DIR = Path(os.getenv("APPDATA", str(Path.home()))) / APP_NAME
-ENGINE_DIR = APP_DIR / "engine"
+
+# Important: older builds used %APPDATA%/SeqDPI/engine and could leave cmd.exe/goodbyedpi.exe
+# with that directory as cwd. Deleting it causes WinError 32. Do not reuse it. Use a new isolated
+# engine directory and clean legacy folders only as a best-effort background task.
+LEGACY_ENGINE_DIR = APP_DIR / "engine"
+ENGINE_DIR = APP_DIR / "engine-turkey-current"
 DOWNLOAD_ZIP = APP_DIR / "goodbyedpi-0.2.3rc3-turkey.zip"
 STATE_FILE = APP_DIR / "state.json"
 LOG_FILE = APP_DIR / "seqdpi.log"
-TURKEY_MARKER = APP_DIR / "engine-is-turkey-release.json"
+TURKEY_MARKER = ENGINE_DIR / "engine-is-turkey-release.json"
 TURKEY_RELEASE_API = "https://api.github.com/repos/cagritaskn/GoodbyeDPI-Turkey/releases/latest"
-TURKEY_RELEASE_ZIP_HINT = "goodbyedpi-0.2.3rc3-turkey"
 QUIC_RULE = "SeqDPI Block QUIC HTTP3"
 SERVICE_NAME = "GoodbyeDPI"
 
@@ -48,13 +52,11 @@ CHECK_URLS = [
     ("Discord", "https://discord.com/"),
     ("Discord gateway", "https://gateway.discord.gg/"),
 ]
-QUICK_LINKS = {
-    "Roblox": "https://www.roblox.com/",
-    "Discord": "https://discord.com/app",
-}
+QUICK_LINKS = {"Roblox": "https://www.roblox.com/", "Discord": "https://discord.com/app"}
 DNS_SERVERS = ["1.1.1.1", "1.0.0.1", "2606:4700:4700::1111", "2606:4700:4700::1001"]
 CREATE_NO_WINDOW = 0x08000000
 CREATE_NEW_PROCESS_GROUP = 0x00000200
+MOVEFILE_DELAY_UNTIL_REBOOT = 0x00000004
 
 
 @dataclass
@@ -116,17 +118,64 @@ class Runner:
         )
 
 
+class ProcessCleaner:
+    def __init__(self, runner, log):
+        self.runner = runner
+        self.log = log
+
+    def clean_before_engine_work(self):
+        self.stop_goodbyedpi_service()
+        self.kill_goodbyedpi_processes()
+        self.kill_processes_using_seqdpi_engine_dirs()
+        self.stop_windivert_services()
+
+    def stop_goodbyedpi_service(self):
+        self.runner.run(["sc", "stop", SERVICE_NAME], timeout=12, check=False)
+        self.runner.run(["sc", "delete", SERVICE_NAME], timeout=12, check=False)
+        self.log("Önceki GoodbyeDPI servisi temizlendi.")
+
+    def kill_goodbyedpi_processes(self):
+        self.runner.run(["taskkill", "/IM", "goodbyedpi.exe", "/F", "/T"], timeout=12, check=False)
+        self.log("Çalışan goodbyedpi.exe süreçleri kapatıldı.")
+
+    def kill_processes_using_seqdpi_engine_dirs(self):
+        # Kills only processes whose command line points at SeqDPI engine folders. This catches
+        # old hidden cmd.exe windows without murdering every cmd.exe on the machine.
+        app = str(APP_DIR).replace("'", "''")
+        current_pid = os.getpid()
+        command = (
+            "$needle = '" + app + "'; "
+            "Get-CimInstance Win32_Process | "
+            "Where-Object { $_.ProcessId -ne " + str(current_pid) + " -and $_.CommandLine -and $_.CommandLine.Contains($needle) } | "
+            "ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {} }"
+        )
+        self.runner.powershell(command, timeout=20, check=False)
+        self.log("SeqDPI engine klasörünü tutan eski süreçler kapatıldı.")
+
+    def stop_windivert_services(self):
+        # WinDivert versions use different service names. All calls are best-effort.
+        for name in ("WinDivert", "WinDivert1.4", "WinDivert2.2", "windivert", "windivert14"):
+            self.runner.run(["sc", "stop", name], timeout=6, check=False)
+        self.log("WinDivert servis kilitleri best-effort durduruldu.")
+
+
 class TurkeyPackage:
-    def __init__(self, log):
+    def __init__(self, runner, cleaner, log):
+        self.runner = runner
+        self.cleaner = cleaner
         self.log = log
 
     def ensure(self):
+        self.cleaner.clean_before_engine_work()
+        self.cleanup_legacy_engine_best_effort()
         if self.is_valid_turkey_extract():
             self.log("GoodbyeDPI-Turkey paketi hazır.")
             return
-        self.log("Eski/yanlış motor temizleniyor. Turkey release zorla indirilecek.")
-        if ENGINE_DIR.exists():
-            shutil.rmtree(ENGINE_DIR)
+        self.replace_current_engine()
+
+    def replace_current_engine(self):
+        self.log("Turkey release temiz klasöre indiriliyor.")
+        self.safe_remove_current_engine()
         ENGINE_DIR.mkdir(parents=True, exist_ok=True)
         release = self.fetch_json(TURKEY_RELEASE_API)
         asset = self.pick_asset(release)
@@ -136,12 +185,67 @@ class TurkeyPackage:
         if not self.has_turkey_runtime_script():
             raise RuntimeError("Turkey paketinde turkey_dnsredir.cmd bulunamadı. Yanlış asset inmiş olabilir.")
         TURKEY_MARKER.write_text(json.dumps({"asset": asset, "time": time.time()}, indent=2), encoding="utf-8")
-        self.log("GoodbyeDPI-Turkey release çıkarıldı. Artık Russia scriptleri kullanılmayacak.")
+        self.log("GoodbyeDPI-Turkey release çıkarıldı.")
+
+    def safe_remove_current_engine(self):
+        if not ENGINE_DIR.exists():
+            return
+        self.cleaner.clean_before_engine_work()
+        trash = APP_DIR / f"engine-turkey-old-{int(time.time())}"
+        try:
+            ENGINE_DIR.rename(trash)
+            self.rmtree_with_retries(trash, allow_reboot_cleanup=True)
+            self.log("Eski Turkey engine klasörü temizlendi.")
+        except OSError as exc:
+            # Never block startup on a locked old folder. Use a fresh directory name instead.
+            self.log(f"Eski Turkey engine kilitli, yanına yeni klasör açılacak: {exc}")
+            fresh = APP_DIR / f"engine-turkey-current-{int(time.time())}"
+            globals()["ENGINE_DIR"] = fresh
+            globals()["TURKEY_MARKER"] = fresh / "engine-is-turkey-release.json"
+
+    def cleanup_legacy_engine_best_effort(self):
+        if not LEGACY_ENGINE_DIR.exists():
+            return
+        try:
+            legacy_trash = APP_DIR / f"engine-legacy-locked-{int(time.time())}"
+            LEGACY_ENGINE_DIR.rename(legacy_trash)
+            self.rmtree_with_retries(legacy_trash, allow_reboot_cleanup=True)
+            self.log("Legacy engine klasörü temizlendi.")
+        except OSError as exc:
+            # This was the user-facing crash. Now it is non-fatal because we no longer use that dir.
+            self.log(f"Legacy engine kilitli, dokunmadan geçiyorum: {exc}")
+            self.schedule_delete_on_reboot(LEGACY_ENGINE_DIR)
+
+    def rmtree_with_retries(self, path, allow_reboot_cleanup=False):
+        for attempt in range(6):
+            try:
+                shutil.rmtree(path, onerror=self.handle_remove_error)
+                return
+            except OSError:
+                time.sleep(0.4 + attempt * 0.3)
+        if allow_reboot_cleanup:
+            self.schedule_delete_on_reboot(path)
+            return
+        raise
+
+    def handle_remove_error(self, func, path, exc_info):
+        try:
+            os.chmod(path, 0o700)
+            func(path)
+        except OSError:
+            raise
+
+    def schedule_delete_on_reboot(self, path):
+        if os.name != "nt":
+            return
+        try:
+            ctypes.windll.kernel32.MoveFileExW(str(path), None, MOVEFILE_DELAY_UNTIL_REBOOT)
+            self.log(f"Kilitli klasör yeniden başlatmada silinmek üzere işaretlendi: {path.name}")
+        except Exception:
+            pass
 
     def is_valid_turkey_extract(self):
-        if not TURKEY_MARKER.exists():
-            return False
-        return self.has_turkey_runtime_script() and bool(self.goodbyedpi_exe())
+        return TURKEY_MARKER.exists() and self.has_turkey_runtime_script() and bool(self.goodbyedpi_exe())
 
     def has_turkey_runtime_script(self):
         return any(path.name.lower() == "turkey_dnsredir.cmd" for path in ENGINE_DIR.rglob("*.cmd"))
@@ -152,20 +256,11 @@ class TurkeyPackage:
             return json.loads(response.read().decode("utf-8"))
 
     def pick_asset(self, release):
-        assets = release.get("assets", [])
-        turkey_assets = []
-        for asset in assets:
+        for asset in release.get("assets", []):
             name = asset.get("name", "").lower()
             if name.endswith(".zip") and "turkey" in name:
-                turkey_assets.append(asset)
-        if not turkey_assets:
-            for asset in assets:
-                name = asset.get("name", "").lower()
-                if name.endswith(".zip") and "source" not in name:
-                    turkey_assets.append(asset)
-        if not turkey_assets:
-            raise RuntimeError("GoodbyeDPI-Turkey release zip asset bulunamadı.")
-        return turkey_assets[0]["browser_download_url"]
+                return asset["browser_download_url"]
+        raise RuntimeError("GoodbyeDPI-Turkey release zip asset bulunamadı.")
 
     def download(self, url, target):
         request = Request(url, headers={"User-Agent": APP_NAME})
@@ -220,7 +315,6 @@ class MethodDiscovery:
         score = 0
         keeps_running = True
         needs_enter = False
-
         if stem == "turkey_dnsredir":
             score = 1000
         elif re.fullmatch(r"turkey_dnsredir_alternative[1-6]_superonline", stem):
@@ -241,43 +335,26 @@ class MethodDiscovery:
             score = 120
         else:
             return None
-
-        display = script.stem.replace("_", " ").replace("-", " ")
-        return Method(
-            name=display,
-            path=script,
-            kind="script",
-            score=score,
-            command=["cmd.exe", "/d", "/c", str(script)],
-            keeps_running=keeps_running,
-            needs_enter=needs_enter,
-        )
+        return Method(script.stem.replace("_", " "), script, "script", score, ["cmd.exe", "/d", "/c", str(script)], keeps_running, needs_enter)
 
     def manual_fallbacks(self):
         exe = self.package.goodbyedpi_exe()
         if not exe:
             return []
-        fallback_args = [["-9"], ["-8"], ["-7"], ["-6"], ["-5"], ["-2"]]
         methods = []
-        for index, args in enumerate(fallback_args):
-            methods.append(Method(
-                name=f"manual {args[0]}",
-                path=exe,
-                kind="exe",
-                score=80 - index,
-                command=[str(exe), *args],
-                keeps_running=True,
-            ))
+        for index, args in enumerate([["-9"], ["-8"], ["-7"], ["-6"], ["-5"], ["-2"]]):
+            methods.append(Method(f"manual {args[0]}", exe, "exe", 80 - index, [str(exe), *args], True))
         return methods
 
 
 class WindowsTweaks:
-    def __init__(self, runner, log):
+    def __init__(self, runner, cleaner, log):
         self.runner = runner
+        self.cleaner = cleaner
         self.log = log
 
     def apply(self):
-        self.stop_existing_service()
+        self.cleaner.clean_before_engine_work()
         self.block_quic()
         self.disable_browser_secure_dns()
         self.disable_chromium_kyber()
@@ -286,11 +363,6 @@ class WindowsTweaks:
     def restore(self):
         self.runner.run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={QUIC_RULE}"], check=False)
         self.log("QUIC/HTTP3 firewall kuralı kaldırıldı.")
-
-    def stop_existing_service(self):
-        self.runner.run(["sc", "stop", SERVICE_NAME], timeout=15, check=False)
-        self.runner.run(["sc", "delete", SERVICE_NAME], timeout=15, check=False)
-        self.log("Önceki GoodbyeDPI servisi temizlendi.")
 
     def block_quic(self):
         self.runner.run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={QUIC_RULE}"], check=False)
@@ -335,9 +407,7 @@ class DnsProfile:
         self.log = log
 
     def adapters(self):
-        _, output = self.runner.powershell(
-            "Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | Select-Object -ExpandProperty Name"
-        )
+        _, output = self.runner.powershell("Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | Select-Object -ExpandProperty Name")
         names = [line.strip() for line in output.splitlines() if line.strip()]
         if not names:
             raise RuntimeError("Aktif ağ adaptörü bulamadım.")
@@ -365,9 +435,10 @@ class EngineLauncher:
     def __init__(self, log):
         self.log = log
         self.runner = Runner()
-        self.package = TurkeyPackage(log)
+        self.cleaner = ProcessCleaner(self.runner, log)
+        self.package = TurkeyPackage(self.runner, self.cleaner, log)
         self.discovery = MethodDiscovery(self.package, log)
-        self.tweaks = WindowsTweaks(self.runner, log)
+        self.tweaks = WindowsTweaks(self.runner, self.cleaner, log)
         self.dns = DnsProfile(self.runner, log)
         self.methods = []
         self.index = 0
@@ -387,24 +458,21 @@ class EngineLauncher:
             self.methods = self.discovery.discover()
         self.stop_runtime_only()
         self.index = (self.index + 1) % len(self.methods)
-        return self.launch_until_one_sticks(start_at_current=True)
+        return self.launch_until_one_sticks()
 
-    def launch_until_one_sticks(self, start_at_current=False):
-        attempts = len(self.methods)
+    def launch_until_one_sticks(self):
         errors = []
-        for _ in range(attempts):
+        for _ in range(len(self.methods)):
             method = self.methods[self.index]
             try:
                 result = self.launch(method)
                 self.active_method = method
-                self.save_state(method)
+                STATE_FILE.write_text(json.dumps({"method": method.name, "time": time.time()}, ensure_ascii=False, indent=2), encoding="utf-8")
                 return result
             except Exception as exc:
                 errors.append(f"{method.name}: {exc}")
                 self.log(f"Metod başarısız: {method.name}. Sıradakine geçiyorum.")
                 self.index = (self.index + 1) % len(self.methods)
-                if start_at_current:
-                    start_at_current = False
         raise RuntimeError("Hiçbir metod çalışmadı:\n" + "\n".join(errors[-6:]))
 
     def launch(self, method):
@@ -418,8 +486,7 @@ class EngineLauncher:
         self.log_tail(output)
         if code != 0:
             raise RuntimeError(output or "service script hata koduyla çıktı")
-        service_ok = self.service_running()
-        if not service_ok:
+        if not self.service_running():
             raise RuntimeError("service script bitti ama GoodbyeDPI servisi çalışıyor görünmüyor")
         self.log("GoodbyeDPI servisi kuruldu ve çalışıyor.")
         return method
@@ -448,8 +515,7 @@ class EngineLauncher:
         time.sleep(3.0)
         if self.process.poll() is not None:
             output_handle.close()
-            output = read_tail(output_file)
-            raise RuntimeError(output or "hemen kapandı, çıktı yok")
+            raise RuntimeError(read_tail(output_file) or "hemen kapandı, çıktı yok")
         self.log(f"Çalışıyor: {method.name}, pid {self.process.pid}")
         return method
 
@@ -465,17 +531,20 @@ class EngineLauncher:
             except subprocess.TimeoutExpired:
                 self.process.kill()
         self.process = None
-        self.runner.run(["taskkill", "/IM", "goodbyedpi.exe", "/F"], check=False)
+        self.cleaner.kill_goodbyedpi_processes()
 
     def stop_all(self):
         self.stop_runtime_only()
         self.run_remove_script()
         self.tweaks.restore()
         self.dns.restore()
-        self.save_empty_state()
+        STATE_FILE.write_text("{}", encoding="utf-8")
 
     def run_remove_script(self):
-        self.package.ensure()
+        try:
+            self.package.ensure()
+        except Exception:
+            pass
         candidates = [path for path in self.package.scripts() if path.name.lower() == "service_remove.cmd"]
         for script in candidates:
             self.log("service_remove.cmd çalıştırılıyor.")
@@ -483,8 +552,7 @@ class EngineLauncher:
             self.log_tail(output)
             if code == 0:
                 break
-        self.runner.run(["sc", "stop", SERVICE_NAME], check=False)
-        self.runner.run(["sc", "delete", SERVICE_NAME], check=False)
+        self.cleaner.stop_goodbyedpi_service()
 
     def log_tail(self, output):
         if not output:
@@ -493,12 +561,6 @@ class EngineLauncher:
             cleaned = line.strip()
             if cleaned:
                 self.log(f"motor: {cleaned}")
-
-    def save_state(self, method):
-        STATE_FILE.write_text(json.dumps({"method": method.name, "time": time.time()}, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    def save_empty_state(self):
-        STATE_FILE.write_text("{}", encoding="utf-8")
 
 
 class ConnectivityTester:
@@ -535,8 +597,7 @@ class ConnectivityTester:
 
 def read_tail(path, max_chars=5000):
     try:
-        text = path.read_text(encoding="utf-8", errors="replace")
-        return text[-max_chars:].strip()
+        return path.read_text(encoding="utf-8", errors="replace")[-max_chars:].strip()
     except OSError:
         return ""
 
@@ -596,11 +657,11 @@ class SeqDPIApp(tk.Tk):
     def build_ui(self):
         shell = ttk.Frame(self, padding=(34, 30, 34, 26))
         shell.pack(fill="both", expand=True)
-        ttk.Label(shell, text="GOODBYEDPI-TURKEY RUNTIME", style="Muted.TLabel").pack(anchor="w")
-        ttk.Label(shell, text="Russia script yok, timeout yok", style="Title.TLabel").pack(anchor="w", pady=(6, 0))
+        ttk.Label(shell, text="GOODBYEDPI-TURKEY ISOLATED ENGINE", style="Muted.TLabel").pack(anchor="w")
+        ttk.Label(shell, text="Kilitli eski klasöre dokunmadan çalışır", style="Title.TLabel").pack(anchor="w", pady=(6, 0))
         ttk.Label(
             shell,
-            text="Turkey release zorla indirilir, önce turkey_dnsredir.cmd çalıştırılır. Runtime batch uzun süre açık kalacağı için timeout hatası sayılmaz, servis scriptleri gerekiyorsa Enter otomatik gönderilir.",
+            text="Eski engine klasörü başka süreç tarafından tutulsa bile çökmez. Yeni Turkey motoru ayrı klasöre iner, eski kilitli klasör best-effort temizlenir veya yeniden başlatmada silinir.",
             style="Body.TLabel",
             wraplength=780,
         ).pack(anchor="w", pady=(10, 24))
@@ -623,17 +684,7 @@ class SeqDPIApp(tk.Tk):
         ttk.Label(shell, text="İşlem günlüğü", style="Muted.TLabel").pack(anchor="w", pady=(0, 8))
         log_frame = tk.Frame(shell, bg="#2b261f", highlightthickness=0)
         log_frame.pack(fill="both", expand=True)
-        self.log_box = tk.Text(
-            log_frame,
-            bg="#2b261f",
-            fg="#f3ede3",
-            insertbackground="#f3ede3",
-            relief="flat",
-            padx=18,
-            pady=16,
-            font=("Cascadia Mono", 10),
-            wrap="word",
-        )
+        self.log_box = tk.Text(log_frame, bg="#2b261f", fg="#f3ede3", insertbackground="#f3ede3", relief="flat", padx=18, pady=16, font=("Cascadia Mono", 10), wrap="word")
         self.log_box.pack(fill="both", expand=True)
         self.log_box.configure(state="disabled")
 
@@ -648,8 +699,8 @@ class SeqDPIApp(tk.Tk):
             self.logger("DNS, firewall ve WinDivert için yönetici izni şart.")
             self.main_button.configure(text="Yönetici olarak aç", command=self.elevate)
             return
-        self.set_status("Hazır. Turkey runtime yöntemi kullanılacak.")
-        self.logger("Yönetici izni tamam. Bu sürüm Russia scriptlerini filtreliyor ve Turkey paketini zorla indiriyor.")
+        self.set_status("Hazır. Kilitli eski engine izole edilecek.")
+        self.logger("Yönetici izni tamam. Bu sürüm eski kilitli engine klasörünü kullanmaz.")
 
     def elevate(self):
         try:
