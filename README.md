@@ -2,7 +2,17 @@
 
 SeqDPI, Türkiye için tek butonlu Windows DPI yardımcı uygulaması.
 
-Bu sürüm çalışan çekirdeği bozmadan paketlemeyi düzeltir: uygulama artık **SeqDPI.exe** olarak, **pencereli modda** ve **CMD konsolu göstermeden** üretilecek şekilde hazırlanmıştır. Python kurulu sistemlerde `SeqDPI.pyw` de konsolsuz açılır.
+Bu sürüm çalışan ağ çekirdeğini bozmadan arayüzü yeniler: neon renkli, animasyonlu, CMD göstermeyen, tek dosya **SeqDPI.exe**.
+
+## Yeni GUI
+
+- Animasyonlu neon arka plan
+- Büyük tek tuş açma alanı
+- Canlı durum halkası
+- Renkli canlı günlük
+- Erişimi aç, sıradaki yöntem, test ve kapat aksiyonları
+- Roblox ve Discord hızlı butonları
+- Konsolsuz `SeqDPI.pyw` launcher
 
 ## Çalıştırma
 
@@ -12,7 +22,7 @@ Geliştirme için:
 python seqdpi.py
 ```
 
-Konsolsuz Python çalıştırma:
+Yeni konsolsuz GUI:
 
 ```powershell
 pythonw SeqDPI.pyw
@@ -36,9 +46,8 @@ dist/SeqDPI.exe
 - Konsol yok: PyInstaller `--windowed`
 - Yönetici izni ister: PyInstaller `--uac-admin`
 - Tek dosya: PyInstaller `--onefile`
-- Windows sürüm bilgisi: `version_info.txt`
 - GitHub Actions artifact: `SeqDPI-windows-exe`
 
 ## Not
 
-Çalışan ağ/DPI mantığına dokunulmadı. Bu PR sadece dağıtım, isimlendirme ve CMD görünmeden çalışma tarafını cilalar.
+Çalışan DPI/DNS mantığına dokunulmadı. Yeni GUI `seqdpi.py` içindeki sağlam çekirdeği import eder.
